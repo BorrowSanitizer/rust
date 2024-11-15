@@ -3,6 +3,7 @@ use std::ops::Deref;
 
 use rustc_abi::{Align, Scalar, Size, WrappingRange};
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
+use rustc_middle::mir::RetagKind;
 use rustc_middle::ty::layout::{FnAbiOf, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{AtomicOrdering, Instance, Ty};
 use rustc_session::config::OptLevel;
@@ -432,6 +433,12 @@ pub trait BuilderMethods<'a, 'tcx>:
         size: Self::Value,
         align: Align,
         flags: MemFlags,
+    );
+
+    fn retag(
+        &mut self,
+        place: PlaceValue<Self::Value>,
+        kind: RetagKind,
     );
 
     /// *Typed* copy for non-overlapping places.
