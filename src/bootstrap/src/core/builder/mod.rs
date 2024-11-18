@@ -16,7 +16,7 @@ use tracing::instrument;
 pub use self::cargo::{Cargo, cargo_profile_var};
 pub use crate::Compiler;
 use crate::core::build_steps::{
-    check, clean, clippy, compile, dist, doc, gcc, install, llvm, run, setup, test, tool, vendor,
+bsan, check, clean, clippy, compile, dist, doc, gcc, install, llvm, run, setup, test, tool, vendor
 };
 use crate::core::config::flags::Subcommand;
 use crate::core::config::{DryRun, TargetSelection};
@@ -902,6 +902,8 @@ impl<'a> Builder<'a> {
                 llvm::Llvm,
                 gcc::Gcc,
                 llvm::Sanitizers,
+                bsan::Bsan,
+                bsan::BsanBorrowTracker,
                 tool::Rustfmt,
                 tool::Cargofmt,
                 tool::Miri,

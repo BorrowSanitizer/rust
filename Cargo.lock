@@ -335,6 +335,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bsan"
+version = "0.1.0"
+dependencies = [
+ "cbindgen",
+ "env_logger",
+ "log",
+ "macros",
+ "miri",
+]
+
+[[package]]
 name = "bstr"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -461,6 +472,25 @@ dependencies = [
 [[package]]
 name = "cargotest2"
 version = "0.1.0"
+
+[[package]]
+name = "cbindgen"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fce8dd7fcfcbf3a0a87d8f515194b49d6135acab73e18bd380d1d93bb1a15eb"
+dependencies = [
+ "clap",
+ "heck 0.4.1",
+ "indexmap",
+ "log",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.87",
+ "tempfile",
+ "toml 0.8.19",
+]
 
 [[package]]
 name = "cc"
@@ -5408,7 +5438,19 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit",
+ "toml_edit 0.19.15",
+]
+
+[[package]]
+name = "toml"
+version = "0.8.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1ed1f98e3fdc28d6d910e6737ae6ab1a93bf1985935a1193e68f93eeb68d24e"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit 0.22.22",
 ]
 
 [[package]]
@@ -6380,7 +6422,20 @@ dependencies = [
 
 [[package]]
 name = "winnow"
+<<<<<<< HEAD
 version = "0.7.10"
+=======
+version = "0.6.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "wit-component"
+version = "0.219.1"
+>>>>>>> 7c6c14f02d4 (Finished initial build process for BSAN.)
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06928c8748d81b05c9be96aad92e1b6ff01833332f281e8cfca3be4b35fc9ec"
 dependencies = [

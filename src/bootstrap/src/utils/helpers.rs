@@ -72,6 +72,7 @@ pub fn exe(name: &str, target: TargetSelection) -> String {
     crate::utils::shared_helpers::exe(name, &target.triple)
 }
 
+<<<<<<< HEAD
 /// Returns the path to the split debug info for the specified file if it exists.
 pub fn split_debuginfo(name: impl Into<PathBuf>) -> Option<PathBuf> {
     // FIXME: only msvc is currently supported
@@ -87,6 +88,10 @@ pub fn split_debuginfo(name: impl Into<PathBuf>) -> Option<PathBuf> {
 
     let pdb: PathBuf = [path.parent()?, Path::new(&file_name)].into_iter().collect();
     pdb.exists().then_some(pdb)
+=======
+pub fn dylib(name: &str, target: TargetSelection) -> String {
+    crate::utils::shared_helpers::dylib(name, &target.triple)
+>>>>>>> 7c6c14f02d4 (Finished initial build process for BSAN.)
 }
 
 /// Returns `true` if the file name given looks like a dynamic library.
