@@ -335,7 +335,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "bsan"
+name = "borrowtracker"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
@@ -344,6 +344,10 @@ dependencies = [
  "macros",
  "miri",
 ]
+
+[[package]]
+name = "bsan"
+version = "0.1.0"
 
 [[package]]
 name = "bstr"
