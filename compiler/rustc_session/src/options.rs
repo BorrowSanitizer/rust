@@ -1923,9 +1923,8 @@ pub mod parse {
         };
 
         *slot = Some(align);
-
-        true
     }
+
 }
 
 options! {

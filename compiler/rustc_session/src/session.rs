@@ -369,6 +369,10 @@ impl Session {
     pub fn coverage_discard_all_spans_in_codegen(&self) -> bool {
         self.opts.unstable_opts.coverage_options.discard_all_spans_in_codegen
     }
+    
+    pub fn is_sanitizer_borrow_enabled(&self) -> bool {
+        self.opts.unstable_opts.sanitizer.contains(SanitizerSet::BORROW)
+    }
 
     pub fn is_sanitizer_cfi_enabled(&self) -> bool {
         self.opts.unstable_opts.sanitizer.contains(SanitizerSet::CFI)
