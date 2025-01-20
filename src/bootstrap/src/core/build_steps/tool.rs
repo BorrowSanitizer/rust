@@ -1217,6 +1217,18 @@ fn run_tool_build_step(
     }
 }
 
+tool_extended!(CargoBsan {
+    path: "src/tools/bsan/cargo-bsan",
+    tool_name: "cargo-bsan",
+    stable: false,
+    add_bins_to_sysroot: ["cargo-bsan"]
+});
+tool_extended!(Bsan {
+    path: "src/tools/bsan/",
+    tool_name: "bsan",
+    stable: false,
+    add_bins_to_sysroot: ["bsan"]
+});
 tool_extended!(Cargofmt {
     path: "src/tools/rustfmt",
     tool_name: "cargo-fmt",
@@ -1253,6 +1265,7 @@ tool_extended!(Rustfmt {
     stable: true,
     add_bins_to_sysroot: ["rustfmt"]
 });
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TestFloatParse {
