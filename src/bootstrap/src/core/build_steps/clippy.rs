@@ -332,6 +332,7 @@ lint_any!(
     BuildHelper, "src/build_helper", "build_helper";
     BuildManifest, "src/tools/build-manifest", "build-manifest";
     CargoMiri, "src/tools/miri/cargo-miri", "cargo-miri";
+    CargoBsan, "src/tools/bsan/cargo-bsan", "cargo-bsan";
     Clippy, "src/tools/clippy", "clippy";
     CollectLicenseMetadata, "src/tools/collect-license-metadata", "collect-license-metadata";
     CodegenGcc, "compiler/rustc_codegen_gcc", "rustc-codegen-gcc";
@@ -342,6 +343,7 @@ lint_any!(
     LintDocs, "src/tools/lint-docs", "lint-docs";
     LlvmBitcodeLinker, "src/tools/llvm-bitcode-linker", "llvm-bitcode-linker";
     Miri, "src/tools/miri", "miri";
+    Bsan, "src/tools/bsan", "bsan";
     MiroptTestTools, "src/tools/miropt-test-tools", "miropt-test-tools";
     OptDist, "src/tools/opt-dist", "opt-dist";
     RemoteTestClient, "src/tools/remote-test-client", "remote-test-client";

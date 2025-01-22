@@ -1218,13 +1218,13 @@ fn run_tool_build_step(
 }
 
 tool_extended!(CargoBsan {
-    path: "src/tools/bsan/cargo-bsan",
+    path: "src/tools/bsan/bsan-cli/cargo-bsan",
     tool_name: "cargo-bsan",
     stable: false,
     add_bins_to_sysroot: ["cargo-bsan"]
 });
 tool_extended!(Bsan {
-    path: "src/tools/bsan/",
+    path: "src/tools/bsan/bsan-cli/",
     tool_name: "bsan",
     stable: false,
     add_bins_to_sysroot: ["bsan"]
