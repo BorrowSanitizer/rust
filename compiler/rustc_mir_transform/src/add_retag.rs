@@ -162,7 +162,7 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             _ => {
                                 if needs_retag(place) {
                                     Some(RetagKind::Default)

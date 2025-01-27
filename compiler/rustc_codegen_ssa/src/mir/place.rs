@@ -3,7 +3,6 @@ use rustc_middle::mir::PlaceTy;
 use rustc_middle::mir::interpret::Scalar;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, Ty};
-
 use rustc_middle::{bug, mir};
 use tracing::{debug, instrument};
 
