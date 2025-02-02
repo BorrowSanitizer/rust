@@ -17,7 +17,7 @@ use crate::core::build_steps::llvm::get_llvm_version;
 use crate::core::build_steps::synthetic_targets::MirOptPanicAbortSyntheticTarget;
 use crate::core::build_steps::tool::{self, COMPILETEST_ALLOW_FEATURES, SourceType, Tool};
 use crate::core::build_steps::toolstate::ToolState;
-use crate::core::build_steps::{compile, dist, llvm};
+use crate::core::build_steps::{bsan, compile, dist, llvm};
 use crate::core::builder::{
     self, Alias, Builder, Compiler, Kind, RunConfig, ShouldRun, Step, crate_description,
 };
@@ -460,6 +460,47 @@ impl Step for Rustfmt {
         cargo.add_rustc_lib_path(builder);
 
         run_cargo_test(cargo, &[], &[], "rustfmt", host, builder);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BsanRT {
+    stage: u32,
+    host: TargetSelection,
+}
+
+impl Step for BsanRT {
+    type Output = ();
+    const ONLY_HOSTS: bool = true;
+
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        run.path("src/tools/bsan/bsanrt")
+    }
+
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(BsanRT { stage: run.builder.top_stage, host: run.target });
+    }
+
+    /// Runs `cargo test` for rustfmt.
+    fn run(self, builder: &Builder<'_>) {
+        let stage = self.stage;
+        let host = self.host;
+        let compiler = builder.compiler(stage, host);
+
+        builder.ensure(bsan::BsanRT { compiler, target: self.host });
+
+        let mut cargo = tool::prepare_tool_cargo(
+            builder,
+            compiler,
+            Mode::ToolRustc,
+            host,
+            Kind::Test,
+            "src/tools/bsan/bsanrt",
+            SourceType::InTree,
+            &[],
+        );
+        cargo.add_rustc_lib_path(builder);
+        run_cargo_test(cargo, &[], &[], "bsanrt", "bsanrt", compiler, host, builder);
     }
 }
 
