@@ -764,6 +764,8 @@ pub enum Kind {
     Miri,
     MiriSetup,
     MiriTest,
+    BsanSetup,
+    BsanTest,
     Bench,
     #[value(alias = "d")]
     Doc,
@@ -790,6 +792,8 @@ impl Kind {
             Kind::Miri => "miri",
             Kind::MiriSetup => panic!("`as_str` is not supported for `Kind::MiriSetup`."),
             Kind::MiriTest => panic!("`as_str` is not supported for `Kind::MiriTest`."),
+            Kind::BsanSetup => panic!("`as_str` is not supported for `Kind::BsanSetup`."),
+            Kind::BsanTest => panic!("`as_str` is not supported for `Kind::BsanTest`."),
             Kind::Bench => "bench",
             Kind::Doc => "doc",
             Kind::Clean => "clean",
@@ -903,7 +907,8 @@ impl<'a> Builder<'a> {
                 llvm::Llvm,
                 gcc::Gcc,
                 llvm::Sanitizers,
-                bsan::Bsan,
+                bsan::BsanRT,
+                bsan::BsanRTCore,
                 tool::CargoBsan,
                 tool::BsanDriver,
                 tool::Rustfmt,
@@ -925,7 +930,7 @@ impl<'a> Builder<'a> {
                 clippy::Bootstrap,
                 clippy::BuildHelper,
                 clippy::BuildManifest,
-                clippy::BsanRT,
+                clippy::BsanRTCore,
                 clippy::CargoBsan,
                 clippy::BsanDriver,
                 clippy::CargoMiri,
@@ -1010,7 +1015,8 @@ impl<'a> Builder<'a> {
                 test::EmbeddedBook,
                 test::EditionGuide,
                 test::Rustfmt,
-                test::BsanRT,
+                test::BsanRTCore,
+                test::BsanDriver,
                 test::Miri,
                 test::CargoMiri,
                 test::Clippy,
@@ -1133,6 +1139,7 @@ impl<'a> Builder<'a> {
             // special-cased in Build::build()
             Kind::Format | Kind::Suggest | Kind::Perf => vec![],
             Kind::MiriTest | Kind::MiriSetup => unreachable!(),
+            Kind::BsanTest | Kind::BsanSetup => unreachable!(),
         }
     }
 
@@ -1447,6 +1454,37 @@ impl<'a> Builder<'a> {
         let mut cmd = command(cargo_clippy.tool_path);
         cmd.env(helpers::dylib_path_var(), env::join_paths(&dylib_path).unwrap());
         cmd.env("CARGO", &self.initial_cargo);
+        cmd
+    }
+
+    pub fn cargo_bsan_cmd(&self, run_compiler: Compiler) -> BootstrapCommand {
+        assert!(run_compiler.stage > 0, "miri can not be invoked at stage 0");
+        let build_compiler = self.compiler(run_compiler.stage - 1, self.build.build);
+
+        // Prepare the tools
+        let bsan = self.ensure(tool::BsanDriver {
+            compiler: build_compiler,
+            target: self.build.build,
+            extra_features: Vec::new(),
+        });
+        let cargo_bsan = self.ensure(tool::CargoBsan {
+            compiler: build_compiler,
+            target: self.build.build,
+            extra_features: Vec::new(),
+        });
+        // Invoke cargo-miri, make sure it can find miri and cargo.
+        let mut cmd = command(cargo_bsan);
+        cmd.env("BSAN", &bsan);
+        cmd.env("CARGO", &self.initial_cargo);
+        // Need to add the `run_compiler` libs. Those are the libs produces *by* `build_compiler`,
+        // so they match the Miri we just built. However this means they are actually living one
+        // stage up, i.e. we are running `stage0-tools-bin/miri` with the libraries in `stage1/lib`.
+        // This is an unfortunate off-by-1 caused (possibly) by the fact that Miri doesn't have an
+        // "assemble" step like rustc does that would cross the stage boundary. We can't use
+        // `add_rustc_lib_path` as that's a NOP on Windows but we do need these libraries added to
+        // the PATH due to the stage mismatch.
+        // Also see https://github.com/rust-lang/rust/pull/123192#issuecomment-2028901503.
+        add_dylib_path(self.rustc_lib_paths(run_compiler), &mut cmd);
         cmd
     }
 
