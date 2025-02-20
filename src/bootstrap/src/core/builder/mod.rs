@@ -908,7 +908,6 @@ impl<'a> Builder<'a> {
                 gcc::Gcc,
                 llvm::Sanitizers,
                 bsan::BsanRT,
-                bsan::BsanRTCore,
                 tool::CargoBsan,
                 tool::BsanDriver,
                 tool::Rustfmt,

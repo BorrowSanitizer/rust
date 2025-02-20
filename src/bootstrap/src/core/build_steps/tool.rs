@@ -1225,9 +1225,9 @@ tool_extended!(CargoBsan {
 });
 tool_extended!(Bsan {
     path: "src/tools/bsan/bsan-driver/",
-    tool_name: "bsan",
+    tool_name: "bsan-driver",
     stable: false,
-    add_bins_to_sysroot: ["bsan"]
+    add_bins_to_sysroot: ["bsan-driver"]
 });
 tool_extended!(Cargofmt {
     path: "src/tools/rustfmt",
