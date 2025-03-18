@@ -100,6 +100,7 @@ impl Step for BsanRT {
         cfg.define("COMPILER_RT_DEFAULT_TARGET_ONLY", "ON");
         cfg.define("COMPILER_RT_USE_LIBCXX", "OFF");
         cfg.define("LLVM_CONFIG_PATH", &llvm_config);
+        cfg.define("BSAN_RT_HEADER_DIR", rust_runtime_parent_dir);
 
         // On Darwin targets the sanitizer runtimes are build as universal binaries.
         // Unfortunately sccache currently lacks support to build them successfully.
