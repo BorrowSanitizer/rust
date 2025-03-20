@@ -1,14 +1,17 @@
 use core::alloc::Layout;
+use core::iter::repeat_n;
 use core::marker::PhantomData;
 use core::mem;
 use core::ops::{Add, BitAnd, Deref, DerefMut, Shr};
+
+use crate::Provenance;
 
 /// Different targets have a different number
 /// of significant bits in their pointer representation.
 /// On 32-bit platforms, all 32-bits are addressable. Most
 /// 64-bit platforms only use 48-bits. Following the LLVM Project,
 /// we hard-code these values based on the underlying architecture.
-/// Most, if not all 64 bit architectures use 48-bits. However, a the
+/// Most, if not all 64 bit architectures use 48-bits. However, the
 /// Armv8-A spec allows addressing 52 or 56 bits as well. No processors
 /// implement this yet, though, so we can use target_pointer_width.
 
@@ -56,46 +59,41 @@ fn table_indices(address: usize) -> (usize, usize) {
     (l1_index, l2_index)
 }
 
-// Provenance values must be sized so that we can allocate an array of them
-// for the L1 page table. We can make provenance values Copy since they should
-// fit within 128 bits and they are not "owned" by any particular object.
-pub trait Provenance: Copy + Sized {}
-
 #[repr(C)]
-pub struct L2<T: Provenance> {
-    bytes: [T; L2_LEN],
+pub struct L2 {
+    bytes: [Provenance; L2_LEN],
 }
 
-impl<T: Provenance> L2<T> {
+impl L2 {
     #[inline(always)]
-    unsafe fn lookup_mut(&mut self, index: usize) -> &mut T {
+    unsafe fn lookup_mut(&mut self, index: usize) -> &mut Provenance {
         self.bytes.get_unchecked_mut(index)
     }
     #[inline(always)]
-    unsafe fn lookup(&mut self, index: usize) -> &T {
+    unsafe fn lookup(&mut self, index: usize) -> &Provenance {
         self.bytes.get_unchecked(index)
     }
 }
 
 #[repr(C)]
-pub struct L1<T: Provenance> {
-    entries: [*mut L2<T>; L1_LEN],
+pub struct L1 {
+    entries: [*mut L2; L1_LEN],
 }
 
-impl<T: Provenance> L1<T> {
+impl L1 {
     fn new() -> Self {
         Self { entries: [core::ptr::null_mut(); L1_LEN] }
     }
 
     #[inline(always)]
-    unsafe fn lookup_mut(&mut self, index: usize) -> Option<&mut T> {
+    unsafe fn lookup_mut(&mut self, index: usize) -> Option<&mut Provenance> {
         let (l1_index, l2_index) = table_indices(index);
         let l2 = self.entries.get_unchecked_mut(l1_index);
         if l2.is_null() { None } else { Some((**l2).lookup_mut(l2_index)) }
     }
 
     #[inline(always)]
-    unsafe fn lookup(&mut self, index: usize) -> Option<&T> {
+    unsafe fn lookup(&mut self, index: usize) -> Option<&Provenance> {
         let (l1_index, l2_index) = table_indices(index);
         let l2 = self.entries.get_unchecked(l1_index);
         if l2.is_null() { None } else { Some((**l2).lookup(l2_index)) }
@@ -106,39 +104,26 @@ impl<T: Provenance> L1<T> {
 /// the interior, unsafe implementation, providing debug assertions
 /// for each method.
 #[repr(transparent)]
-pub struct ShadowHeap<T: Provenance> {
-    l1: L1<T>,
+pub struct ShadowHeap {
+    l1: L1,
 }
 
-impl<T: Provenance> Default for ShadowHeap<T> {
+impl Default for ShadowHeap {
     fn default() -> Self {
-        let l1 = L1::<T>::new();
+        let l1 = L1::new();
         Self { l1 }
     }
 }
 
-impl<T: Provenance> Deref for ShadowHeap<T> {
-    type Target = L1<T>;
+impl Deref for ShadowHeap {
+    type Target = L1;
     fn deref(&self) -> &Self::Target {
         &self.l1
     }
 }
 
-impl<T: Provenance> DerefMut for ShadowHeap<T> {
+impl DerefMut for ShadowHeap {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.l1
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    type TestProv = u8;
-
-    impl Provenance for TestProv {}
-
-    #[test]
-    fn create_and_drop() {
-        let _ = ShadowHeap::<TestProv>::default();
     }
 }
