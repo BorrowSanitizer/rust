@@ -4,7 +4,6 @@ change-id = 132494
 build-stage = 1
 test-stage = 1
 docs = false
-incremental = true
 extended = true
 tools = [
     "bsan-rt",
