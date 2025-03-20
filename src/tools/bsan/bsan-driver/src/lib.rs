@@ -3,8 +3,8 @@
 
 extern crate rustc_driver;
 
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const BSAN_BUG_REPORT_URL: &str = "https://github.com/BorrowSanitizer/rust/issues/new";

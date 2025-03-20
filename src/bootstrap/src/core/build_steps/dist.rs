@@ -2375,7 +2375,7 @@ impl Step for RustDev {
     fn run(self, builder: &Builder<'_>) -> Option<GeneratedTarball> {
         let target = self.target;
 
-        /* run only if  isn't used */
+        /* run only if llvm-config isn't used */
         if let Some(config) = builder.config.target_config.get(&target) {
             if let Some(ref _s) = config.llvm_config {
                 builder.info(&format!("Skipping RustDev ({target}): external LLVM"));

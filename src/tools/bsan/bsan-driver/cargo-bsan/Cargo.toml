@@ -11,7 +11,6 @@ log = "0.4.22"
 rustc-build-sysroot = "0.5.4"
 rustc_version = "0.4.1"
 rustc_tools_util = "0.4.0"
-regex = "1.5.5"
 
 [build-dependencies]
 rustc_tools_util = "0.4.0"
