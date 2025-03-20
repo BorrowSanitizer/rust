@@ -11,12 +11,14 @@ use libc::{MAP_ANONYMOUS, MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
 use crate::BsanAllocator;
 use crate::global::{GlobalContext, global_ctx};
 
+use crate::Provenance;
+
 /// Different targets have a different number
 /// of significant bits in their pointer representation.
 /// On 32-bit platforms, all 32-bits are addressable. Most
 /// 64-bit platforms only use 48-bits. Following the LLVM Project,
 /// we hard-code these values based on the underlying architecture.
-/// Most, if not all 64 bit architectures use 48-bits. However, a the
+/// Most, if not all 64 bit architectures use 48-bits. However, the
 /// Armv8-A spec allows addressing 52 or 56 bits as well. No processors
 /// implement this yet, though, so we can use target_pointer_width.
 
@@ -69,11 +71,6 @@ pub fn table_indices(address: usize) -> (usize, usize) {
 
     (l1_index, l2_index)
 }
-
-// Provenance values must be sized so that we can allocate an array of them
-// for the L1 page table. We can make provenance values Copy since they should
-// fit within 128 bits and they are not "owned" by any particular object.
-pub trait Provenance: Copy + Sized {}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -144,7 +141,7 @@ pub struct ShadowHeap<T: Provenance> {
     l1: L1<T>,
 }
 
-impl<T: Provenance> Default for ShadowHeap<T> {
+impl Default for ShadowHeap {
     fn default() -> Self {
         Self { l1: unsafe { L1::new(global_ctx().allocator) } }
     }
