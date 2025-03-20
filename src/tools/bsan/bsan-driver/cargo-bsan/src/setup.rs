@@ -197,4 +197,3 @@ pub fn setup(
 
     sysroot_dir
 }
-
