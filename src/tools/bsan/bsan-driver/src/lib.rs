@@ -3,6 +3,7 @@
 
 extern crate rustc_driver;
 
+use std::path::PathBuf;
 use std::env;
 use std::sync::Arc;
 
@@ -22,12 +23,13 @@ pub fn run_compiler(
     using_internal_features: Arc<std::sync::atomic::AtomicBool>,
 ) -> ! {
     if target_crate {
-        let mut additional_args =
-            BSAN_DEFAULT_ARGS.iter().map(ToString::to_string).collect::<Vec<_>>();
-        if let Some(runtime) = env::var_os("BSAN_RT_SYSROOT") {
-            let rt = runtime.to_string_lossy();
-            additional_args.push(format!("-L{}/lib", rt));
+        let mut additional_args = Vec::<String>::new();
+        if let Some(runtime) = env::var_os("BSAN_HOST_SYSROOT") {
+            let mut path = PathBuf::from(runtime.to_str().expect("non-UTF-8 component in path"));
+            path.push("lib");
+            additional_args.push(format!("-L{}", path.display()));
         }
+        additional_args.extend(BSAN_DEFAULT_ARGS.iter().map(ToString::to_string));
         args.splice(1..1, additional_args);
     }
     let exit_code = rustc_driver::catch_with_exit_code(move || {
