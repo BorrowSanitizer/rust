@@ -542,7 +542,7 @@ impl Step for BsanDriver {
         // we'd have stageN/bin/rustc and stageN/bin/rustdoc be effectively different stage
         // compilers, which isn't what we want. Rustdoc should be linked in the same way as the
         // rustc compiler it's paired with, so it must be built with the previous stage compiler.
-        let host_compiler = builder.compiler(stage-1, host);
+        let host_compiler = builder.compiler(stage - 1, host);
 
         // Build our tools.
         let bsan_driver = builder.ensure(tool::BsanDriver {
