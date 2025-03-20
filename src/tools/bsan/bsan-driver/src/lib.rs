@@ -3,6 +3,8 @@
 
 extern crate rustc_driver;
 
+use std::path::PathBuf;
+use std::env;
 use std::sync::Arc;
 
 pub const BSAN_BUG_REPORT_URL: &str = "https://github.com/BorrowSanitizer/rust/issues/new";
@@ -21,9 +23,14 @@ pub fn run_compiler(
     using_internal_features: Arc<std::sync::atomic::AtomicBool>,
 ) -> ! {
     if target_crate {
-        // Some options have different defaults in Miri than in plain rustc; apply those by making
-        // them the first arguments after the binary name (but later arguments can overwrite them).
-        args.splice(1..1, BSAN_DEFAULT_ARGS.iter().map(ToString::to_string));
+        let mut additional_args = Vec::<String>::new();
+        if let Some(runtime) = env::var_os("BSAN_HOST_SYSROOT") {
+            let mut path = PathBuf::from(runtime.to_str().expect("non-UTF-8 component in path"));
+            path.push("lib");
+            additional_args.push(format!("-L{}", path.display()));
+        }
+        additional_args.extend(BSAN_DEFAULT_ARGS.iter().map(ToString::to_string));
+        args.splice(1..1, additional_args);
     }
     let exit_code = rustc_driver::catch_with_exit_code(move || {
         rustc_driver::RunCompiler::new(&args, callbacks)

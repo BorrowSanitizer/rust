@@ -1,7 +1,6 @@
 //! Implements `cargo bsan setup`.
 //! This was copied directly from cargo-miri, with only small changes
 //! to comments and the names of environment variables.
-
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::{self, Command};
@@ -71,7 +70,7 @@ pub fn setup(
     }
 
     // Determine where to put the sysroot.
-    let sysroot_dir = get_sysroot_dir();
+    let sysroot_dir = get_target_sysroot_dir();
 
     // Sysroot configuration and build details.
     let no_std = match std::env::var_os("BSAN_NO_STD") {
@@ -113,6 +112,7 @@ pub fn setup(
         } else {
             command.env("RUSTC", &cargo_bsan_path);
         }
+
         command.env("BSAN_CALLED_FROM_SETUP", "1");
         // Miri expects `BSAN_SYSROOT` to be set when invoked in target mode. Even if that directory is empty.
         command.env("BSAN_SYSROOT", &sysroot_dir);
@@ -167,7 +167,7 @@ pub fn setup(
 
     // Do the build.
     let status = SysrootBuilder::new(&sysroot_dir, target)
-        .build_mode(BuildMode::Check)
+        .build_mode(BuildMode::Build)
         .rustc_version(rustc_version.clone())
         .sysroot_config(sysroot_config)
         .rustflags(rustflags)
@@ -197,3 +197,4 @@ pub fn setup(
 
     sysroot_dir
 }
+

@@ -1,12 +1,13 @@
 use std::env;
 use std::ffi::OsString;
-use std::fs::File;
+use std::fs::{File};
 use std::io::{self, Write};
 use std::ops::Not;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cargo_metadata::{Metadata, MetadataCommand};
+//use regex::Regex;
 
 use crate::arg::*;
 
@@ -97,6 +98,15 @@ pub fn exec(mut cmd: Command) -> ! {
     }
 }
 
+pub fn exec_stdout(mut cmd: Command) -> String {
+    let output = cmd.output().expect("failed to run command");
+    if output.status.success() {
+        String::from_utf8(output.stdout).expect("output bytes should be valid utf8")
+    } else {
+        panic!("failed to run command: {:?}", output)
+    }
+}
+
 #[allow(unused)]
 pub fn exec_with_pipe<P>(mut cmd: Command, input: &[u8], path: P) -> !
 where
@@ -133,10 +143,19 @@ where
     }
 }
 
+/// Determines where the host sysroot of this execution is
+pub fn get_host_sysroot_dir(verbose: usize) -> PathBuf {
+    let mut cmd = bsan_for_host();
+    cmd.args(["--print", "sysroot"]);
+    debug_cmd("[cargo-bsan rustc]", verbose, &cmd);
+    let libdir = exec_stdout(cmd);
+    PathBuf::from(libdir.trim())
+}
+
 /// Determines where the sysroot of this execution is
 ///
 /// Either in a user-specified spot by an envar, or in a default cache location.
-pub fn get_sysroot_dir() -> PathBuf {
+pub fn get_target_sysroot_dir() -> PathBuf {
     match std::env::var_os("BSAN_SYSROOT") {
         Some(dir) => PathBuf::from(dir),
         None => {
@@ -212,7 +231,7 @@ pub fn get_cargo_metadata() -> Metadata {
 }
 
 pub fn clean_sysroot_dir() {
-    let sysroot = get_sysroot_dir();
+    let sysroot = get_target_sysroot_dir();
     if sysroot.exists() {
         std::fs::remove_dir_all(&sysroot).unwrap();
     }
