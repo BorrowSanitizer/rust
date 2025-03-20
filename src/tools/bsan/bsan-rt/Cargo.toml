@@ -5,12 +5,17 @@ edition = "2021"
 
 [dependencies]
 libc = { version = "0.2.169", default-features = false }
+hashbrown = { version = "0.15.2", default-features = false, features = ["nightly", "inline-more"] }
+rustc-hash = { version = "2.1.1", default-features = false }
 
 [lib]
 name = "bsan_rt"
 crate-type = ["staticlib"] 
 test = true     # we have unit tests
 doctest = false # but no doc tests
+
+[features]
+ui_test = []
 
 [build-dependencies]
 cbindgen = "0.28.0"
