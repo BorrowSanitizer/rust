@@ -476,9 +476,6 @@ impl BsanDriver {
         target: TargetSelection,
         bsan_runtime_dir: &PathBuf,
     ) -> PathBuf {
-        // We need the BSAN runtime to be able to build our instrumented sysroot.
-        builder.ensure(BsanRT { compiler, target });
-
         let bsan_sysroot = builder.out.join(compiler.host).join("bsan-sysroot");
         let mut cargo = builder::Cargo::new(
             builder,
@@ -573,7 +570,7 @@ impl Step for BsanDriver {
 
         // We also need sysroots, for BSAN and for the host (the latter for build scripts).
         // This is for the tests so everything is done with the target compiler.
-        let sysroot = BsanDriver::build_bsan_sysroot(builder, target_compiler, target);
+        let bsan_sysroot = BsanDriver::build_bsan_sysroot(builder, target_compiler, target);
         builder.ensure(compile::Std::new(target_compiler, host));
         let host_sysroot = builder.sysroot(target_compiler);
 
@@ -581,17 +578,17 @@ impl Step for BsanDriver {
         // the sysroot gets rebuilt, to avoid "found possibly newer version of crate `std`" errors.
         if !builder.config.dry_run() {
             let ui_test_dep_dir = builder.stage_out(host_compiler, Mode::ToolStd).join("bsan_ui");
-            // The mtime of `bsan_sysroot` changes when the sysroot gets rebuilt (also see
+            // The mtime of `miri_sysroot` changes when the sysroot gets rebuilt (also see
             // <https://github.com/RalfJung/rustc-build-sysroot/commit/10ebcf60b80fe2c3dc765af0ff19fdc0da4b7466>).
             // We can hence use that directly as a signal to clear the ui test dir.
-            builder.clear_if_dirty(&ui_test_dep_dir, &sysroot);
+            builder.clear_if_dirty(&ui_test_dep_dir, &bsan_sysroot);
         }
 
         // Run `cargo test`.
         // This is with the bsan-driver crate, so it uses the host compiler.
         let mut cargo = tool::prepare_tool_cargo(
             builder,
-            target_compiler,
+            host_compiler,
             Mode::ToolRustc,
             host,
             Kind::Test,
@@ -607,7 +604,7 @@ impl Step for BsanDriver {
         let mut cargo = prepare_cargo_test(cargo, &[], &[], "bsan", host_compiler, host, builder);
 
         // bsan tests need to know about the stage sysroot
-        cargo.env("BSAN_SYSROOT", &sysroot);
+        cargo.env("BSAN_SYSROOT", &bsan_sysroot);
         cargo.env("BSAN_HOST_SYSROOT", &host_sysroot);
 
         // Since our runtime is build with the Stage N-1 compiler,
@@ -619,6 +616,9 @@ impl Step for BsanDriver {
 
         cargo.env("BSAN_RT_SYSROOT", &builder.sysroot(host_compiler));
         cargo.env("BSAN", &bsan_driver);
+
+        // Set the target.
+        cargo.env("BSAN_TEST_TARGET", target.rustc_target_arg());
         {
             let _guard = builder.msg_sysroot_tool(Kind::Test, stage, "bsan", host, target);
             let _time = helpers::timeit(builder);
