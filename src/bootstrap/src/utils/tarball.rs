@@ -26,6 +26,7 @@ pub(crate) enum OverlayKind {
     RustAnalyzer,
     RustcCodegenCranelift,
     LlvmBitcodeLinker,
+    Bsan,
 }
 
 impl OverlayKind {
@@ -73,6 +74,7 @@ impl OverlayKind {
                 "LICENSE-MIT",
                 "src/tools/llvm-bitcode-linker/README.md",
             ],
+            OverlayKind::Bsan => &["COPYRIGHT", "LICENSE-APACHE", "LICENSE-MIT"],
         }
     }
 
@@ -96,6 +98,7 @@ impl OverlayKind {
                 .version(builder, &builder.release_num("rust-analyzer/crates/rust-analyzer")),
             OverlayKind::RustcCodegenCranelift => builder.rust_version(),
             OverlayKind::LlvmBitcodeLinker => builder.rust_version(),
+            OverlayKind::Bsan => builder.rust_version(),
         }
     }
 }
