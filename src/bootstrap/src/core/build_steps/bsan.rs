@@ -256,6 +256,7 @@ impl Step for BsanRTCore {
         );
 
         cargo.rustflag("-Cembed-bitcode=yes");
+        cargo.rustflag("-Clto");
         cargo.rustflag("-Cpanic=abort");
         cargo.env("BSAN_HEADER_DIR", builder.cargo_out(compiler, mode, target));
         let build_success = compile::stream_cargo(builder, cargo, vec![], &mut |_| {});
