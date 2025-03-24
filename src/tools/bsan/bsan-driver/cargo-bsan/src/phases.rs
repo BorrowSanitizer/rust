@@ -113,8 +113,8 @@ pub fn phase_cargo_bsan(mut args: impl Iterator<Item = String>) {
         cmd.env("BSAN_VERBOSE", verbose.to_string()); // This makes the other phases verbose.
     }
 
-    if env::var_os("BSAN_HOST_SYSROOT").is_none() {
-        cmd.env("BSAN_HOST_SYSROOT", get_host_sysroot_dir(verbose));
+    if env::var_os("BSAN_RT_SYSROOT").is_none() {
+        cmd.env("BSAN_RT_SYSROOT", get_host_sysroot_dir(verbose));
     }
 
     // Run cargo.

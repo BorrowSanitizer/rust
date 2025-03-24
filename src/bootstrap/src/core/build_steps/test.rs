@@ -570,7 +570,13 @@ impl Step for BsanDriver {
 
         // We also need sysroots, for BSAN and for the host (the latter for build scripts).
         // This is for the tests so everything is done with the target compiler.
-        let bsan_sysroot = BsanDriver::build_bsan_sysroot(builder, target_compiler, target);
+        let bsan_sysroot = BsanDriver::build_bsan_sysroot(
+            builder,
+            target_compiler,
+            target,
+            &builder.sysroot(host_compiler),
+        );
+
         builder.ensure(compile::Std::new(target_compiler, host));
         let host_sysroot = builder.sysroot(target_compiler);
 
@@ -604,6 +610,7 @@ impl Step for BsanDriver {
         let mut cargo = prepare_cargo_test(cargo, &[], &[], "bsan", host_compiler, host, builder);
 
         // bsan tests need to know about the stage sysroot
+
         cargo.env("BSAN_SYSROOT", &bsan_sysroot);
         cargo.env("BSAN_HOST_SYSROOT", &host_sysroot);
 

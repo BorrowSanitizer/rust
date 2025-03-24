@@ -5,6 +5,7 @@ extern crate rustc_driver;
 
 use std::env;
 use std::sync::Arc;
+
 pub const BSAN_BUG_REPORT_URL: &str = "https://github.com/BorrowSanitizer/rust/issues/new";
 
 pub const BSAN_DEFAULT_ARGS: &[&str] =
@@ -23,8 +24,9 @@ pub fn run_compiler(
     if target_crate {
         let mut additional_args =
             BSAN_DEFAULT_ARGS.iter().map(ToString::to_string).collect::<Vec<_>>();
-        if let Some(runtime) = env::var_os("BSAN_HOST_SYSROOT") {
-            additional_args.push(format!("-L{}/lib", runtime.to_string_lossy()));
+        if let Some(runtime) = env::var_os("BSAN_RT_SYSROOT") {
+            let rt = runtime.to_string_lossy();
+            additional_args.push(format!("-L{}/lib", rt));
         }
         args.splice(1..1, additional_args);
     }
