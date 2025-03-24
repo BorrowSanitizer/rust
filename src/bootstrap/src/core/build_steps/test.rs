@@ -474,6 +474,7 @@ impl BsanDriver {
         builder: &Builder<'_>,
         compiler: Compiler,
         target: TargetSelection,
+        bsan_runtime_dir: &PathBuf,
     ) -> PathBuf {
         let bsan_sysroot = builder.out.join(compiler.host).join("bsan-sysroot");
         let mut cargo = builder::Cargo::new(
@@ -489,6 +490,7 @@ impl BsanDriver {
         cargo.env("BSAN_LIB_SRC", builder.src.join("library"));
         // Tell it where to put the sysroot.
         cargo.env("BSAN_SYSROOT", &bsan_sysroot);
+        cargo.env("BSAN_RT_SYSROOT", bsan_runtime_dir);
 
         let mut cargo = BootstrapCommand::from(cargo);
         let _guard =
@@ -568,7 +570,13 @@ impl Step for BsanDriver {
 
         // We also need sysroots, for BSAN and for the host (the latter for build scripts).
         // This is for the tests so everything is done with the target compiler.
-        let bsan_sysroot = BsanDriver::build_bsan_sysroot(builder, target_compiler, target);
+        let bsan_sysroot = BsanDriver::build_bsan_sysroot(
+            builder,
+            target_compiler,
+            target,
+            &builder.sysroot(host_compiler),
+        );
+
         builder.ensure(compile::Std::new(target_compiler, host));
         let host_sysroot = builder.sysroot(target_compiler);
 
@@ -602,8 +610,18 @@ impl Step for BsanDriver {
         let mut cargo = prepare_cargo_test(cargo, &[], &[], "bsan", host_compiler, host, builder);
 
         // bsan tests need to know about the stage sysroot
+
         cargo.env("BSAN_SYSROOT", &bsan_sysroot);
         cargo.env("BSAN_HOST_SYSROOT", &host_sysroot);
+
+        // Since our runtime is build with the Stage N-1 compiler,
+        // we need to tell BSAN to search for it separately in the StageN-1
+        // sysroot. This is only necessary for platforms where the runtime
+        // is a dynamically linked library; otherwise, the StageN-1 compiler
+        // used by bsan-driver will link against the runtime in the that
+        // sysroot automatically.
+
+        cargo.env("BSAN_RT_SYSROOT", &builder.sysroot(host_compiler));
         cargo.env("BSAN", &bsan_driver);
 
         // Set the target.
