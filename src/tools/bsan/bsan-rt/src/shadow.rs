@@ -189,6 +189,8 @@ impl ShadowHeap<T: Provenance> {
 
 #[cfg(test)]
 mod tests {
+    use core::ptr::null;
+
     use super::*;
     type TestProv = u8;
 
@@ -197,5 +199,34 @@ mod tests {
     #[test]
     fn create_and_drop() {
         let _ = ShadowHeap::<TestProv>::default();
+    }
+
+    #[test]
+    fn load_null() {
+        let s = ShadowHeap::<TestProv>::default();
+        let k = unsafe { s.lookup(null()) };
+    }
+
+    #[test]
+    fn test_malloc_zero() {
+        let mut s = ShadowHeap::<TestProv>::default();
+        unsafe { s.malloc(null::<u8>() as *mut u8, 0) };
+    }
+
+    #[test]
+    fn test_malloc_small() {
+        let mut s = ShadowHeap::<TestProv>::default();
+        let ptr = Box::into_raw(Box::new(0u8)) as *mut u8;
+        unsafe { s.malloc(ptr, 1) };
+    }
+
+    #[test]
+    fn test_lookup_after_malloc() {
+        let mut s = ShadowHeap::<TestProv>::default();
+        let ptr = Box::into_raw(Box::new(0u8)) as *mut u8;
+        unsafe {
+            s.malloc(ptr, 1);
+            let _ = s.lookup(ptr);
+        }
     }
 }
