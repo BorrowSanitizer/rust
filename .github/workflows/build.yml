@@ -34,7 +34,7 @@ jobs:
   build:
     needs: [fmt]
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         config:
           - arch: x86 Linux
