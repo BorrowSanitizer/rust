@@ -352,7 +352,9 @@ name = "bsan-rt"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "hashbrown",
  "libc",
+ "rustc-hash 2.1.1",
 ]
 
 [[package]]
