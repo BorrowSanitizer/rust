@@ -290,3 +290,11 @@ mod tests {
         }
     }
 }
+
+mod tests {
+    use super::*;
+    #[test]
+    fn create_and_drop() {
+        let _ = ShadowHeap::default();
+    }
+}
