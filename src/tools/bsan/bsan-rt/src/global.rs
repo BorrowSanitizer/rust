@@ -55,7 +55,7 @@ impl GlobalCtx {
 /// Prints to stdout.
 macro_rules! print {
     ($ctx:expr, $($arg:tt)*) => {{
-        ctx.print(core::format_args!($($arg)*));
+        $ctx.print(core::format_args!($($arg)*));
     }};
 }
 pub(crate) use print;
@@ -202,24 +202,7 @@ mod global_alloc {
     static GLOBAL_ALLOCATOR: DummyAllocator = DummyAllocator;
 }
 
-#[cfg(not(test))]
 pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalCtx>> = SyncUnsafeCell::new(None);
-
-#[cfg(test)]
-pub static TEST_HOOKS: BsanHooks = BsanHooks {
-    alloc: BsanAllocHooks { malloc: libc::malloc, free: libc::free },
-    mmap: libc::mmap,
-    munmap: libc::munmap,
-    print: |ptr| unsafe {
-        println!(mem::transmute::<&str>(ptr));
-    },
-};
-
-/// A singleton instance of `GlobalCtx`. All API functions
-/// rely on this state to be initialized.
-#[cfg(test)]
-pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalCtx>> =
-    SyncUnsafeCell::new(Some(GlobalCtx::new(TEST_HOOKS)));
 
 /// Initializes the global context object.
 /// This function must only be called once: when the program is first initialized.
@@ -247,3 +230,23 @@ pub unsafe fn deinit_global_ctx() {
 pub unsafe fn global_ctx() -> &'static GlobalCtx {
     (&(*GLOBAL_CTX.get())).as_ref().unwrap_unchecked()
 }
+
+
+#[cfg(test)]
+unsafe extern "C" fn test_print(ptr: *const c_char) {
+    std::println!("{}", CStr::from_ptr(ptr).to_str().expect("Invalid UTF-8"));
+}
+
+#[cfg(test)]
+unsafe extern "C" fn test_exit() -> !{
+    std::process::exit(0);
+}
+
+#[cfg(test)]
+pub static TEST_HOOKS: BsanHooks = BsanHooks {
+    alloc: BsanAllocHooks { malloc: libc::malloc, free: libc::free },
+    mmap: libc::mmap,
+    munmap: libc::munmap,
+    print: test_print,
+    exit: test_exit
+};
