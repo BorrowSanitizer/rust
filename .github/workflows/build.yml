@@ -18,7 +18,7 @@ defaults:
     shell: bash
 concurrency:
   group: build
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   fmt:
     runs-on: macos-latest
