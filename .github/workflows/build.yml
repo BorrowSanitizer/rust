@@ -41,8 +41,8 @@ jobs:
             os: ubuntu-latest
           - arch: ARM64 macOS
             os: macos-latest
-          - arch: ARM64 Linux
-            os: ubuntu-24.04-arm
+          #  - arch: ARM64 Linux
+          #    os: ubuntu-24.04-arm
     runs-on: '${{ matrix.config.os }}'
     name: 'Build (${{ matrix.config.arch }})'
     steps:
