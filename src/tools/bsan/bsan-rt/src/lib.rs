@@ -139,20 +139,6 @@ impl AllocInfo {
     }
 }
 
-/// When a function returns, our instrumentation stores the provenance of its return value
-/// in this thread-local array so that it can be read by the caller.
-#[no_mangle]
-#[thread_local]
-#[allow(non_upper_case_globals)]
-pub static mut __bsan_retval_tls: [Provenance; 100] = [Provenance::null(); 100];
-
-/// When we call a function, we write the provenance of its arguments into this thread-local array
-/// so that we can read them in the callee.
-#[no_mangle]
-#[thread_local]
-#[allow(non_upper_case_globals)]
-pub static mut __bsan_arg_tls: [Provenance; 100] = [Provenance::null(); 100];
-
 /// Initializes the global state of the runtime library.
 /// The safety of this library is entirely dependent on this
 /// function having been executed. We assume the global invariant that
@@ -245,6 +231,14 @@ extern "C" fn bsan_dealloc(span: Span, prov: *mut Provenance) {
 extern "C" fn bsan_expose_tag(prov: *const Provenance) {
     debug_assert!(prov != ptr::null_mut());
 }
+
+/// Copies provenance stored in the given range in shadow memory from the source to destination.
+#[no_mangle]
+extern "C" fn bsan_shadow_copy(dst: usize, src: usize, access_size: usize) {}
+
+/// Clears provenance from shadow memory starting at a given address.
+#[no_mangle]
+extern "C" fn bsan_shadow_clear(addr: usize, access_size: usize) {}
 
 #[cfg(not(test))]
 #[panic_handler]
