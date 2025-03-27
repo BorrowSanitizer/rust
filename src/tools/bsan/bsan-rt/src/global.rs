@@ -1,6 +1,5 @@
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::cell::SyncUnsafeCell;
 use core::ffi::CStr;
 use core::fmt;
@@ -13,47 +12,39 @@ use core::sync::atomic::AtomicUsize;
 use hashbrown::{DefaultHashBuilder, HashMap};
 use rustc_hash::FxBuildHasher;
 
-use crate::BsanHooks;
+use crate::*;
 
 /// Every action that requires a heap allocation must be performed through a globally
-/// accessible, singleton instance of `GlobalContext`. Initializing or obtaining
+/// accessible, singleton instance of `GlobalCtx`. Initializing or obtaining
 /// a reference to this instance is unsafe, since it requires having been initialized
 /// with a valid set of `BsanHooks`, which is provided from across the FFI.
-/// Only shared references (&self) can be obtained, since this object will be concurrently
-/// accessed. All of the API endpoints here can be soundly marked as safe under the assumption
-/// that these invariants hold. This design pattern requires us to pass the `GlobalContext` instance
+/// Only shared references (&self) can be obtained, since this object will be accessed concurrently.
+/// All of its API endpoints are free from undefined behavior, under
+/// that these invariants hold. This design pattern requires us to pass the `GlobalCtx` instance
 /// around explicitly, but it prevents us from relying on implicit global state and limits the spread
 /// of unsafety throughout the library.
 #[derive(Debug)]
-pub struct GlobalContext {
-    pub hooks: BsanHooks,
+pub struct GlobalCtx {
+    hooks: BsanHooks,
     next_alloc_id: AtomicUsize,
 }
 
-impl GlobalContext {
-    /// Creates a new instance of `GlobalContext` using the given `BsanHooks`.
+impl GlobalCtx {
+    /// Creates a new instance of `GlobalCtx` using the given `BsanHooks`.
     /// This function will also initialize our shadow heap
     fn new(hooks: BsanHooks) -> Self {
         Self { hooks, next_alloc_id: AtomicUsize::new(1) }
     }
 
-    /// Creates a new instance of `BVec<T>`, allocated using the
-    /// `GlobalContext` instance as an `Allocator`.
-    pub fn vec<T>(&self) -> BVec<T> {
-        BVec::new()
-    }
-
-    /// Creates a new instance of `BVecDeque<T>`, which will be allocated using the
-    /// `GlobalContext` instance as an `Allocator`.
-    pub fn vecdeque<T>(&self) -> BVecDeque<T> {
-        BVecDeque::new()
+    fn alloc(&self) -> BsanAllocHooks {
+        self.hooks.alloc
     }
 
     /// Prints a given set of formatted arguments. This function is not meant
     /// to be called directly; instead, it should be used with the `print!`,
     /// `println!`, and `ui_test!` macros.
     pub fn print(&self, args: fmt::Arguments<'_>) {
-        let mut w = self.vec();
+        let mut w = BVec::new(self);
         let _ = write!(&mut w, "{}", args);
         unsafe {
             (self.hooks.print)(mem::transmute(w.as_ptr()));
@@ -98,38 +89,12 @@ macro_rules! ui_test {
 }
 pub(crate) use ui_test;
 
-unsafe impl Allocator for &GlobalContext {
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        unsafe {
-            match layout.size() {
-                0 => Ok(NonNull::slice_from_raw_parts(layout.dangling(), 0)),
-                // SAFETY: `layout` is non-zero in size,
-                size => unsafe {
-                    let raw_ptr: *mut u8 = mem::transmute((self.hooks.malloc)(layout.size()));
-                    let ptr = NonNull::new(raw_ptr).ok_or(AllocError)?;
-                    Ok(NonNull::slice_from_raw_parts(ptr, size))
-                },
-            }
-        }
-    }
-
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, _layout: Layout) {
-        (self.hooks.free)(mem::transmute(ptr.as_ptr()))
-    }
-}
-
-/// A thin wrapper around `Vec` that uses `GlobalContext` as its allocator
-#[derive(Debug, Clone)]
-pub struct BVec<T>(Vec<T, &'static GlobalContext>);
-
-impl<T> BVec<T> {
-    fn new() -> Self {
-        unsafe { Self(Vec::new_in(global_ctx())) }
-    }
-}
+/// A thin wrapper around `Vec` that uses `GlobalCtx` as its allocator
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BVec<T>(Vec<T, BsanAllocHooks>);
 
 impl<T> Deref for BVec<T> {
-    type Target = Vec<T, &'static GlobalContext>;
+    type Target = Vec<T, BsanAllocHooks>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -142,9 +107,15 @@ impl<T> DerefMut for BVec<T> {
     }
 }
 
+impl<T> BVec<T> {
+    fn new(ctx: &GlobalCtx) -> Self {
+        unsafe { Self(Vec::new_in(ctx.alloc())) }
+    }
+}
+
 /// We provide this trait implementation so that we can use `BVec` to
 /// store the temporary results of formatting a string in the implementation
-/// of `GlobalContext::print`
+/// of `GlobalCtx::print`
 impl core::fmt::Write for BVec<u8> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let bytes = s.bytes();
@@ -157,18 +128,12 @@ impl core::fmt::Write for BVec<u8> {
     }
 }
 
-/// A thin wrapper around `VecDeque` that uses `GlobalContext` as its allocator
+/// A thin wrapper around `VecDeque` that uses `GlobalCtx` as its allocator
 #[derive(Debug, Clone)]
-pub struct BVecDeque<T>(VecDeque<T, &'static GlobalContext>);
-
-impl<T> BVecDeque<T> {
-    fn new() -> Self {
-        unsafe { Self(VecDeque::new_in(global_ctx())) }
-    }
-}
+pub struct BVecDeque<T>(VecDeque<T, BsanAllocHooks>);
 
 impl<T> Deref for BVecDeque<T> {
-    type Target = VecDeque<T, &'static GlobalContext>;
+    type Target = VecDeque<T, BsanAllocHooks>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -181,22 +146,22 @@ impl<T> DerefMut for BVecDeque<T> {
     }
 }
 
+impl<T> BVecDeque<T> {
+    fn new(ctx: &GlobalCtx) -> Self {
+        unsafe { Self(VecDeque::new_in(ctx.alloc())) }
+    }
+}
+
 /// The seed for the random state of the hash function for `BHashMap`.
 /// Equal to the decimal encoding of the ascii for "BSAN".
 static BSAN_HASH_SEED: usize = 1112752462;
 
-/// A thin wrapper around `HashMap` that uses `GlobalContext` as its allocator
+/// A thin wrapper around `HashMap` that uses `GlobalCtx` as its allocator
 #[derive(Debug, Clone)]
-pub struct BHashMap<K, V>(HashMap<K, V, FxBuildHasher, &'static GlobalContext>);
-
-impl<K, V> BHashMap<K, V> {
-    fn new() -> Self {
-        unsafe { Self(HashMap::with_hasher_in(FxBuildHasher, global_ctx())) }
-    }
-}
+pub struct BHashMap<K, V>(HashMap<K, V, FxBuildHasher, BsanAllocHooks>);
 
 impl<K, V> Deref for BHashMap<K, V> {
-    type Target = HashMap<K, V, FxBuildHasher, &'static GlobalContext>;
+    type Target = HashMap<K, V, FxBuildHasher, BsanAllocHooks>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -208,8 +173,14 @@ impl<K, V> DerefMut for BHashMap<K, V> {
     }
 }
 
+impl<K, V> BHashMap<K, V> {
+    fn new(ctx: &GlobalCtx) -> Self {
+        unsafe { Self(HashMap::with_hasher_in(FxBuildHasher, ctx.alloc())) }
+    }
+}
+
 /// We need to declare a global allocator to be able to use `alloc` in a `#[no_std]`
-/// crate. Anything other than the `GlobalContext` object will clash with the interceptors,
+/// crate. Anything other than the `GlobalCtx` object will clash with the interceptors,
 /// so we provide a placeholder that panics when it is used.
 #[cfg(not(test))]
 mod global_alloc {
@@ -232,12 +203,11 @@ mod global_alloc {
 }
 
 #[cfg(not(test))]
-pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalContext>> = SyncUnsafeCell::new(None);
+pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalCtx>> = SyncUnsafeCell::new(None);
 
 #[cfg(test)]
 pub static TEST_HOOKS: BsanHooks = BsanHooks {
-    malloc: libc::malloc,
-    free: libc::free,
+    alloc: BsanAllocHooks { malloc: libc::malloc, free: libc::free },
     mmap: libc::mmap,
     munmap: libc::munmap,
     print: |ptr| unsafe {
@@ -245,19 +215,19 @@ pub static TEST_HOOKS: BsanHooks = BsanHooks {
     },
 };
 
-/// A singleton instance of `GlobalContext`. All API functions
+/// A singleton instance of `GlobalCtx`. All API functions
 /// rely on this state to be initialized.
 #[cfg(test)]
-pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalContext>> =
-    SyncUnsafeCell::new(Some(GlobalContext::new(TEST_HOOKS)));
+pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalCtx>> =
+    SyncUnsafeCell::new(Some(GlobalCtx::new(TEST_HOOKS)));
 
 /// Initializes the global context object.
 /// This function must only be called once: when the program is first initialized.
 /// It is marked as `unsafe`, because it relies on the set of function pointers in
 /// `BsanHooks` to be valid.
 #[inline]
-pub unsafe fn init_global_ctx(hooks: BsanHooks) -> &'static GlobalContext {
-    *GLOBAL_CTX.get() = Some(GlobalContext::new(hooks));
+pub unsafe fn init_global_ctx(hooks: BsanHooks) -> &'static GlobalCtx {
+    *GLOBAL_CTX.get() = Some(GlobalCtx::new(hooks));
     global_ctx()
 }
 
@@ -274,6 +244,6 @@ pub unsafe fn deinit_global_ctx() {
 /// the context is initialized, e.g. `bsan_init` has been called and `bsan_deinit`
 /// has not yet been called.
 #[inline]
-pub unsafe fn global_ctx() -> &'static GlobalContext {
+pub unsafe fn global_ctx() -> &'static GlobalCtx {
     (&(*GLOBAL_CTX.get())).as_ref().unwrap_unchecked()
 }

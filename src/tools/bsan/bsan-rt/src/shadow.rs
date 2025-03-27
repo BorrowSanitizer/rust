@@ -127,3 +127,11 @@ impl DerefMut for ShadowHeap {
         &mut self.l1
     }
 }
+
+mod tests {
+    use super::*;
+    #[test]
+    fn create_and_drop() {
+        let _ = ShadowHeap::default();
+    }
+}
