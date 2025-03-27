@@ -231,14 +231,13 @@ pub unsafe fn global_ctx() -> &'static GlobalCtx {
     (&(*GLOBAL_CTX.get())).as_ref().unwrap_unchecked()
 }
 
-
 #[cfg(test)]
 unsafe extern "C" fn test_print(ptr: *const c_char) {
     std::println!("{}", CStr::from_ptr(ptr).to_str().expect("Invalid UTF-8"));
 }
 
 #[cfg(test)]
-unsafe extern "C" fn test_exit() -> !{
+unsafe extern "C" fn test_exit() -> ! {
     std::process::exit(0);
 }
 
@@ -248,5 +247,5 @@ pub static TEST_HOOKS: BsanHooks = BsanHooks {
     mmap: libc::mmap,
     munmap: libc::munmap,
     print: test_print,
-    exit: test_exit
+    exit: test_exit,
 };
