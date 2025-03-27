@@ -16,9 +16,6 @@ permissions:
 defaults:
   run:
     shell: bash
-concurrency:
-  group: build
-  cancel-in-progress: false
 jobs:
   fmt:
     runs-on: macos-latest
