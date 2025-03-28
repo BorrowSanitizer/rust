@@ -7,8 +7,8 @@ docs = false
 extended = true
 tools = [
     "bsan-rt",
+    "bsan",
     "cargo-bsan",
-    "bsan-driver"
 ]
 
 [rust]

@@ -1,0 +1,12 @@
+[package]
+authors = ["BSAN Team"]
+description = "dependencies that unit tests can have"
+license = "MIT OR Apache-2.0"
+name = "bsan-test-deps"
+repository = "https://github.com/borrowsanitizer/rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[workspace]

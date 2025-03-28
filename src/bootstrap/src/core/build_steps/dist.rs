@@ -17,6 +17,7 @@ use std::{env, fs};
 use object::BinaryFormat;
 use object::read::archive::ArchiveFile;
 
+use crate::core::build_steps::bsan::BsanRT;
 use crate::core::build_steps::doc::DocumentationFormat;
 use crate::core::build_steps::tool::{self, Tool};
 use crate::core::build_steps::vendor::default_paths_to_vendor;
@@ -1257,6 +1258,60 @@ impl Step for Clippy {
 }
 
 #[derive(Debug, PartialOrd, Ord, Clone, Hash, PartialEq, Eq)]
+pub struct Bsan {
+    pub compiler: Compiler,
+    pub target: TargetSelection,
+}
+
+impl Step for Bsan {
+    type Output = Option<GeneratedTarball>;
+    const DEFAULT: bool = true;
+    const ONLY_HOSTS: bool = true;
+
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        let default = should_build_extended_tool(run.builder, "bsan-driver");
+        run.alias("bsan").default_condition(default)
+    }
+
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(Bsan {
+            compiler: run.builder.compiler_for(
+                run.builder.top_stage,
+                run.builder.config.build,
+                run.target,
+            ),
+            target: run.target,
+        });
+    }
+
+    fn run(self, builder: &Builder<'_>) -> Option<GeneratedTarball> {
+        // This prevents bsan from being built for "dist" or "install"
+        // on the stable/beta channels. It is a nightly-only tool and should
+        // not be included.
+        if !builder.build.unstable_features() {
+            return None;
+        }
+        let compiler = self.compiler;
+        let target = self.target;
+
+        let bsanrt = builder.ensure(BsanRT { compiler, target });
+        let bsandriver =
+            builder.ensure(tool::BsanDriver { compiler, target, extra_features: Vec::new() });
+        let cargobsan =
+            builder.ensure(tool::CargoBsan { compiler, target, extra_features: Vec::new() });
+
+        let mut tarball = Tarball::new(builder, "bsan", &target.triple);
+        tarball.set_overlay(OverlayKind::Bsan);
+        tarball.is_preview(true);
+        tarball.add_file(bsandriver, "bin", 0o755);
+        tarball.add_file(cargobsan, "bin", 0o755);
+        tarball.add_file(bsanrt, "lib", 0o755);
+        tarball.add_legal_and_readme_to("share/doc/bsan");
+        Some(tarball.generate())
+    }
+}
+
+#[derive(Debug, PartialOrd, Ord, Clone, Hash, PartialEq, Eq)]
 pub struct Miri {
     pub compiler: Compiler,
     pub target: TargetSelection,
@@ -1504,6 +1559,7 @@ impl Step for Extended {
         add_component!("llvm-components" => LlvmTools { target });
         add_component!("clippy" => Clippy { compiler, target });
         add_component!("miri" => Miri { compiler, target });
+        add_component!("bsan" => Bsan { compiler, target });
         add_component!("analysis" => Analysis { compiler, target });
         add_component!("rustc-codegen-cranelift" => CodegenBackend {
             compiler: builder.compiler(stage, target),
@@ -1909,7 +1965,7 @@ impl Step for Extended {
                     cmd.arg("-dMiriDir=miri");
                 }
                 if built_tools.contains("bsan") {
-                    cmd.arg("-dBsanDir=miri");
+                    cmd.arg("-dBsanDir=bsan");
                 }
                 if target.is_windows_gnu() {
                     cmd.arg("-dGccDir=rust-mingw");
