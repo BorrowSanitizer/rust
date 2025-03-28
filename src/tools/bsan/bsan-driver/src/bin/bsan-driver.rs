@@ -19,17 +19,13 @@ fn main() {
     let args = rustc_driver::args::raw_args(&early_dcx)
         .unwrap_or_else(|_| std::process::exit(rustc_driver::EXIT_FAILURE));
 
-    // We need to determine the subset of arguments to pass to the rustc invocation,
-    // as well as whether we need to add our BorrowSanitizer instrumentation when
-    // compiling the crate.
-
     let (args, target_crate) = {
         // If the `BSAN_BE_RUSTC` environment variable is set, we are being invoked as
         // rustc to build a crate for either the "target" architecture, or the "host"
-        // architecture. In this case "target" and "host" are the same, since we do not
-        // support cross-compilation. However "target" indicates that the program needs
+        // architecture. In this case, "target" and "host" are the same platform, since we do not
+        // support cross-compilation. However, "target" also indicates that the program needs
         // to be instrumented, while "host" indicates that it is a build script or procedural
-        // macro, which we can skip instrumenting.
+        // macro, which we can skip.
 
         if let Some(crate_kind) = env::var("BSAN_BE_RUSTC").ok() {
             let is_target = match crate_kind.as_str() {
@@ -46,7 +42,7 @@ fn main() {
             // after the "--" separator, since these will be passed to the compiled binary
             // when it executes.
             let mut rustc_args = vec![];
-            for arg in args.iter().skip(1) {
+            for arg in args.iter() {
                 if arg == "--" {
                     break;
                 } else {

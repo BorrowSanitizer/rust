@@ -19,7 +19,7 @@ pub struct BsanRT {
     pub target: TargetSelection,
 }
 impl Step for BsanRT {
-    type Output = Option<SanitizerRuntime>;
+    type Output = PathBuf;
     const DEFAULT: bool = true;
     const ONLY_HOSTS: bool = true;
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
@@ -53,26 +53,34 @@ impl Step for BsanRT {
             exit!(1);
         }
 
-        let bindir = builder.sysroot_target_bindir(compiler, target);
         let out_dir = builder.native_dir(self.target).join("sanitizers");
 
         let cpp_runtime = supports_bsan(&out_dir, self.target, &builder.config.channel);
         if cpp_runtime.is_none() {
-            return None;
+            eprintln!("ERROR: BorrowSanitizer is not supported for target {}.", self.target);
+            exit!(1);
         }
+
         let cpp_runtime = cpp_runtime.unwrap();
         let LlvmResult { llvm_config, .. } = builder.ensure(Llvm { target: builder.config.build });
 
         let compiler_rt_dir = builder.src.join("src/llvm-project/compiler-rt");
-        if !compiler_rt_dir.exists() {
-            return None;
-        }
 
+        let lib_name = cpp_runtime.name;
+
+        // Like other sanitizer runtimes, we want to install this runtime into
+        // both rustlib and the root of the sysroot libdir
         let rust_runtime_path = builder.ensure(BsanRTCore { compiler, target });
         let rust_runtime_parent_dir = rust_runtime_path.parent().unwrap();
 
+        let libdir = builder.sysroot_target_libdir(compiler, target);
+        let rustc_libdir = builder.rustc_libdir(compiler);
+
+        let dst = libdir.join(&lib_name);
+        let rustc_dst = rustc_libdir.join(&lib_name);
+
         if builder.config.dry_run() {
-            return Some(cpp_runtime);
+            return rustc_dst;
         }
         // On targets that build BSAN as a static runtime, we need to manually add in the object files
         // for the Rust runtime using llvm-ar (see below). If the C++ sources haven't changed, then CMake
@@ -136,12 +144,14 @@ impl Step for BsanRT {
         // way to declare an external static archive (libbsan_rt.a) as a build dependency
         // of another static archive (libclang-rt-<arch>.bsan.a) in CMake—at least, not if
         // the external archive contains an unknown, varying quantity of object files.
-        if !is_dylib(&cpp_runtime.name) {
+        if !is_dylib(&lib_name) {
             let temp_dir = builder.build.tempdir().join("bsan-rt");
             if temp_dir.exists() {
                 fs::remove_dir_all(&temp_dir).unwrap();
             }
             fs::create_dir_all(&temp_dir).unwrap();
+
+            let bindir = builder.sysroot_target_bindir(compiler, target);
 
             // Since our Rust runtime depends on core,
             // we need to remove all global symbols except for
@@ -176,22 +186,17 @@ impl Step for BsanRT {
                 .run(builder);
         }
 
-        let libdir = builder.sysroot_target_libdir(compiler, target);
-        let dst = libdir.join(&cpp_runtime.name);
         builder.copy_link(&cpp_runtime.path, &dst);
 
         if target.contains("-apple-") {
             // Update the library’s install name to reflect that it has been renamed.
-            apple_darwin_update_library_name(
-                builder,
-                &dst,
-                &format!("@rpath/{}", &cpp_runtime.name),
-            );
+            apple_darwin_update_library_name(builder, &dst, &format!("@rpath/{}", &lib_name));
             // Upon renaming the install name, the code signature of the file will invalidate,
             // so we will sign it again.
             apple_darwin_sign_file(builder, &dst);
         }
-        Some(cpp_runtime)
+        builder.copy_link(&dst, &rustc_dst);
+        rustc_dst
     }
 }
 

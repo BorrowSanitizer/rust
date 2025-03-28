@@ -54,7 +54,7 @@ pub fn phase_cargo_bsan(mut args: impl Iterator<Item = String>) {
 
     setup(&subcommand, &rustc_version.host.as_str(), &rustc_version, verbose, quiet);
 
-    let bsan_sysroot = get_sysroot_dir();
+    let bsan_sysroot = get_target_sysroot_dir();
     let bsan_path = find_bsan();
 
     let cargo_cmd = match subcommand {
@@ -111,6 +111,10 @@ pub fn phase_cargo_bsan(mut args: impl Iterator<Item = String>) {
     cmd.env("BSAN_SYSROOT", bsan_sysroot);
     if verbose > 0 {
         cmd.env("BSAN_VERBOSE", verbose.to_string()); // This makes the other phases verbose.
+    }
+
+    if env::var_os("BSAN_RT_SYSROOT").is_none() {
+        cmd.env("BSAN_RT_SYSROOT", get_host_sysroot_dir(verbose));
     }
 
     // Run cargo.

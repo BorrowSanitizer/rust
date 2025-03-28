@@ -16,9 +16,6 @@ permissions:
 defaults:
   run:
     shell: bash
-concurrency:
-  group: build
-  cancel-in-progress: true
 jobs:
   fmt:
     runs-on: macos-latest
@@ -34,18 +31,15 @@ jobs:
   build:
     needs: [fmt]
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         config:
           - arch: x86 Linux
             os: ubuntu-latest
-            install_cmd: sudo apt-get install ninja-build
           - arch: ARM64 macOS
             os: macos-latest
-            install_cmd: brew install ninja
-          - arch: ARM64 Linux
-            os: ubuntu-24.04-arm
-            install_cmd: sudo apt-get install ninja-build
+          #  - arch: ARM64 Linux
+          #    os: ubuntu-24.04-arm
     runs-on: '${{ matrix.config.os }}'
     name: 'Build (${{ matrix.config.arch }})'
     steps:
@@ -54,7 +48,6 @@ jobs:
           fetch-depth: 0
       - name: Install dependencies
         run: |
-          ${{matrix.config.install_cmd}}
           rustup component add llvm-tools-preview
           cp src/bootstrap/defaults/config.bsan.dev.toml config.toml
       - name: Upstream
@@ -64,5 +57,5 @@ jobs:
       - name: Unit Tests
         run: ./x.py test --stage 1 src/tools/bsan/bsan-rt
       - name: UI Tests
-        run: ./x.py test --stage 1 src/tools/bsan/bsan-driver
+        run: ./x.py test --stage 2 src/tools/bsan/bsan-driver
       
