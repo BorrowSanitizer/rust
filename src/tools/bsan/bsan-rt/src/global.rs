@@ -232,20 +232,36 @@ pub unsafe fn global_ctx() -> &'static GlobalCtx {
 }
 
 #[cfg(test)]
-unsafe extern "C" fn test_print(ptr: *const c_char) {
-    std::println!("{}", CStr::from_ptr(ptr).to_str().expect("Invalid UTF-8"));
-}
+mod test {
+    use crate::*;
 
-#[cfg(test)]
-unsafe extern "C" fn test_exit() -> ! {
-    std::process::exit(0);
-}
+    unsafe extern "C" fn test_print(ptr: *const c_char) {
+        std::println!("{}", std::ffi::CStr::from_ptr(ptr).to_str().expect("Invalid UTF-8"));
+    }
 
-#[cfg(test)]
-pub static TEST_HOOKS: BsanHooks = BsanHooks {
-    alloc: BsanAllocHooks { malloc: libc::malloc, free: libc::free },
-    mmap: libc::mmap,
-    munmap: libc::munmap,
-    print: test_print,
-    exit: test_exit,
-};
+    unsafe extern "C" fn test_exit() -> ! {
+        std::process::exit(0);
+    }
+
+    unsafe extern "C" fn test_mmap(
+        addr: *mut c_void,
+        len: usize,
+        prot: i32,
+        flags: i32,
+        fd: i32,
+        offset: u64,
+    ) -> *mut c_void {
+        // LLVM's sanitizer API uses u64 for OFF_T, but libc uses i64
+        // We use this wrapper function to avoid having to manually update
+        // the bindings.
+        libc::mmap(addr, len, prot, flags, fd, offset as i64)
+    }
+
+    pub static TEST_HOOKS: BsanHooks = BsanHooks {
+        alloc: BsanAllocHooks { malloc: libc::malloc, free: libc::free },
+        mmap: test_mmap,
+        munmap: libc::munmap,
+        print: test_print,
+        exit: test_exit,
+    };
+}

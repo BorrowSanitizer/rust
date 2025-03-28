@@ -24,7 +24,7 @@ pub use global::*;
 
 mod shadow;
 
-pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, i64) -> *mut c_void;
+pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, u64) -> *mut c_void;
 pub type MUnmap = unsafe extern "C" fn(*mut c_void, usize) -> i32;
 pub type Malloc = unsafe extern "C" fn(usize) -> *mut c_void;
 pub type Free = unsafe extern "C" fn(*mut c_void);
