@@ -40,6 +40,10 @@ impl GlobalCtx {
         self.hooks.alloc
     }
 
+    fn exit(&self) -> ! {
+        unsafe { (self.hooks.exit)() }
+    }
+
     /// Prints a given set of formatted arguments. This function is not meant
     /// to be called directly; instead, it should be used with the `print!`,
     /// `println!`, and `ui_test!` macros.
