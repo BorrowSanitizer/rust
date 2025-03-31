@@ -286,6 +286,7 @@ extern "C" fn bsan_pop_frame(span: Span) {}
 #[no_mangle]
 extern "C" fn bsan_alloc(span: Span, prov: *mut MaybeUninit<Provenance>, addr: usize) {
     debug_assert!(prov != ptr::null_mut());
+
     unsafe {
         (*prov).write(Provenance::null());
     }
@@ -295,6 +296,7 @@ extern "C" fn bsan_alloc(span: Span, prov: *mut MaybeUninit<Provenance>, addr: u
 #[no_mangle]
 extern "C" fn bsan_alloc_stack(span: Span, prov: *mut MaybeUninit<Provenance>, size: usize) {
     debug_assert!(prov != ptr::null_mut());
+
     unsafe {
         (*prov).write(Provenance::null());
     }
