@@ -15,7 +15,11 @@ pub struct GlobalContext {
 
 impl GlobalContext {
     fn new(allocator: BsanAllocator) -> Self {
-        Self { allocator, next_alloc_id: AtomicUsize::new(1), shadow_heap: ShadowHeap::new(allocator) }
+        Self {
+            allocator,
+            next_alloc_id: AtomicUsize::new(1),
+            shadow_heap: ShadowHeap::new(allocator),
+        }
     }
 }
 

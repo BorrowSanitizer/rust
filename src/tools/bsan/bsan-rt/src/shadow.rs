@@ -159,19 +159,13 @@ pub struct ShadowHeap<T: Provenance> {
 
 impl<T: Provenance> Default for ShadowHeap<T> {
     fn default() -> Self {
-        let l1 = unsafe {
-            L1::new(global_ctx().allocator)
-        };
-        Self { l1 }
+        Self { l1: unsafe { L1::new(global_ctx().allocator) } }
     }
 }
 
 impl<T: Provenance> ShadowHeap<T> {
     pub fn new(allocator: BsanAllocator) -> Self {
-        let l1 = unsafe {
-            L1::new(allocator)
-        };
-        Self { l1 }
+        Self { l1: L1::new(allocator) }
     }
 }
 
