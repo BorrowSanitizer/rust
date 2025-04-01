@@ -34,7 +34,7 @@ fn test_lookup_after_malloc() {
     let mut s = ShadowHeap::<TestProv>::default();
     let ptr = Box::into_raw(Box::new(0u8)) as *mut u8;
     unsafe {
-        s.malloc(ptr, 1);
+        let _ = s.malloc(ptr, 1);
         let _ = s.lookup(ptr);
     }
 } 
