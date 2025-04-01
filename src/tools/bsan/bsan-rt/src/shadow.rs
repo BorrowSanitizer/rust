@@ -190,9 +190,6 @@ impl<T: Provenance> DerefMut for ShadowHeap<T> {
 
 impl<T: Provenance> ShadowHeap<T> {
     pub unsafe fn load_prov(&mut self, address: usize) -> T {
-        if ptr.is_null() {
-            return T::default();
-        }
         let (l1_addr, l2_addr) = table_indices(address);
         let mut l2 = (*self.l1.entries)[l1_addr];
         if l2.is_null() {
