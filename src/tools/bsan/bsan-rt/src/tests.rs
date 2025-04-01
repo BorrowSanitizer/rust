@@ -1,7 +1,9 @@
 use core::ptr::{null, null_mut};
-use crate::shadow::*;
-use crate::BsanAllocator;
+
 use libc::{MAP_ANONYMOUS, MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
+
+use crate::BsanAllocator;
+use crate::shadow::*;
 
 #[derive(Debug, Copy, Clone)]
 struct TestProv {
@@ -98,11 +100,10 @@ fn test_store_and_load_prov() {
     let test_prov = TestProv { value: 42 };
     let addr = 0x1000;
     
+
     unsafe {
         heap.store_prov(&test_prov, addr);
         let loaded_prov = heap.load_prov(addr as *mut c_void);
         assert_eq!(loaded_prov.value, test_prov.value);
     }
 }
-
-

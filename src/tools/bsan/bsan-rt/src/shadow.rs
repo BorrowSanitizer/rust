@@ -207,4 +207,3 @@ impl<T: Provenance> ShadowHeap<T> {
         *(*l2).lookup_mut(l2_addr) = *provenance;
     }
 }
-
