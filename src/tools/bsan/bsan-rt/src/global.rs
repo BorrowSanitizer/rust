@@ -3,7 +3,7 @@ use core::sync::atomic::AtomicUsize;
 
 #[cfg(test)]
 use crate::TEST_ALLOC;
-use crate::shadow::{L1, ShadowHeap};
+use crate::shadow::ShadowHeap;
 use crate::{BsanAllocator, Provenance};
 
 #[derive(Debug)]
@@ -15,8 +15,9 @@ pub struct GlobalContext {
 
 impl GlobalContext {
     fn new(allocator: BsanAllocator) -> Self {
-        let l1: L1<Provenance> = L1::new(allocator);
-        Self { allocator, next_alloc_id: AtomicUsize::new(1), shadow_heap: ShadowHeap { l1 } }
+        //let shadow_heap = ShadowHeap::new(allocator);
+        //let l1: L1<Provenance> = L1::new(allocator);
+        Self { allocator, next_alloc_id: AtomicUsize::new(1), shadow_heap }
     }
 }
 

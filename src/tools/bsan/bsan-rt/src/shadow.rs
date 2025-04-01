@@ -2,6 +2,7 @@ use core::alloc::Layout;
 use core::ffi::c_void;
 use core::marker::PhantomData;
 use core::ops::{Add, BitAnd, Deref, DerefMut, Shr};
+use core::slice::SliceIndex;
 use core::{mem, ptr};
 
 use libc::{MAP_ANONYMOUS, MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
@@ -67,8 +68,11 @@ pub fn table_indices(address: usize) -> (usize, usize) {
 // fit within 128 bits and they are not "owned" by any particular object.
 pub trait Provenance: Copy + Sized {}
 
+unsafe impl<T: Provenance> Sync for L2<T> {}
+unsafe impl<T: Provenance> Sync for L1<T> {}
+
 #[repr(C)]
-pub struct L2<T: Provenance> {
+struct L2<T: Provenance> {
     pub bytes: *mut [T; L2_LEN],
 }
 
@@ -83,7 +87,6 @@ impl<T: Provenance> L2<T> {
                 -1,
                 0,
             );
-
             ptr::write_bytes(l2_void as *mut u8, 0, size_of::<T>() * L2_LEN);
             mem::transmute(l2_void)
         };
@@ -92,17 +95,18 @@ impl<T: Provenance> L2<T> {
     }
     #[inline(always)]
     pub unsafe fn lookup_mut(&mut self, index: usize) -> &mut T {
-        self.bytes.get_unchecked_mut(index)
+        &mut (*self.bytes)[index]
     }
     #[inline(always)]
     pub unsafe fn lookup(&mut self, index: usize) -> &T {
-        self.bytes.get_unchecked(index)
+        &(*self.bytes)[index]
     }
 }
 
 #[repr(C)]
-pub struct L1<T: Provenance> {
-    pub entries: *mut [*mut L2<T>; L1_LEN], //
+#[derive(Debug)]
+struct L1<T: Provenance> {
+    pub entries: *mut [*mut L2<T>; L1_LEN],
 }
 
 impl<T: Provenance> L1<T> {
@@ -128,15 +132,15 @@ impl<T: Provenance> L1<T> {
     #[inline(always)]
     unsafe fn lookup_mut(&mut self, index: usize) -> Option<&mut T> {
         let (l1_index, l2_index) = table_indices(index);
-        let l2 = self.entries.get_unchecked_mut(l1_index);
-        if l2.is_null() { None } else { Some((**l2).lookup_mut(l2_index)) }
+        let l2 = (*self.entries)[l1_index];
+        if l2.is_null() { None } else { Some((*l2).lookup_mut(l2_index)) }
     }
 
     #[inline(always)]
     unsafe fn lookup(&mut self, index: usize) -> Option<&T> {
         let (l1_index, l2_index) = table_indices(index);
-        let l2 = self.entries.get_unchecked(l1_index);
-        if l2.is_null() { None } else { Some((**l2).lookup(l2_index)) }
+        let l2 = (*self.entries)[l1_index];
+        if l2.is_null() { None } else { Some((*l2).lookup(l2_index)) }
     }
 }
 
@@ -169,21 +173,6 @@ impl<T: Provenance> Deref for ShadowHeap<T> {
 impl<T: Provenance> DerefMut for ShadowHeap<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.l1
-    }
-}
-
-impl ShadowHeap<T: Provenance> {
-    unsafe fn malloc(&mut self, ptr: *mut u8, size: usize) {
-        if size == 0 {
-            return;
-        }
-        let (l1_addr, l2_addr) = table_indices(ptr);
-        match self.l1.lookup_mut(l1_addr) {
-            None => {
-                // if there is no valid L2, it will initialize
-            }
-            Some(l2) => {}
-        };
     }
 }
 
