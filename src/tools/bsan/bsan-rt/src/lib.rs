@@ -79,9 +79,23 @@ impl AllocId {
     pub fn get(&self) -> usize {
         self.0
     }
-    /// The minimum representable tag
-    pub const fn zero() -> Self {
+    /// An invalid allocation
+    pub const fn null() -> Self {
         AllocId(0)
+    }
+
+    /// Represents any valid allocation
+    pub const fn wildcard() -> Self {
+        AllocId(1)
+    }
+
+    /// A global or stack allocation, which cannot be manually freed
+    pub const fn sticky() -> Self {
+        AllocId(2)
+    }
+
+    pub const fn min() -> Self {
+        AllocId(3)
     }
 }
 
@@ -97,18 +111,11 @@ impl fmt::Debug for AllocId {
 pub struct BorTag(usize);
 
 impl BorTag {
-    pub fn new(i: usize) -> Self {
+    pub const fn new(i: usize) -> Self {
         BorTag(i)
     }
     pub fn get(&self) -> usize {
         self.0
-    }
-    /// The minimum representable tag
-    pub const fn zero() -> Self {
-        BorTag(0)
-    }
-    pub const fn one() -> Self {
-        BorTag(1)
     }
 }
 
@@ -139,19 +146,18 @@ impl Provenance {
     /// pointers.
     const fn null() -> Self {
         Provenance {
-            alloc_id: AllocId::zero(),
-            bor_tag: BorTag::zero(),
+            alloc_id: AllocId::null(),
+            bor_tag: BorTag::new(0),
             alloc_info: core::ptr::null_mut(),
         }
     }
 
     /// Pointers cast from integers receive a "wildcard" provenance value, which permits
-    /// any access. A provenance value with an `alloc_id` of zero and any non-zero `bor_tag`
-    /// is treated as a wildcard provenance value.
+    /// any access.
     const fn wildcard() -> Self {
         Provenance {
-            alloc_id: AllocId::zero(),
-            bor_tag: BorTag::one(),
+            alloc_id: AllocId::wildcard(),
+            bor_tag: BorTag::new(0),
             alloc_info: core::ptr::null_mut(),
         }
     }
@@ -175,7 +181,7 @@ impl AllocInfo {
     /// When we deallocate an allocation, we need to invalidate its metadata.
     /// so that any uses-after-free are detectable.
     fn dealloc(&mut self) {
-        self.alloc_id = AllocId::zero();
+        self.alloc_id = AllocId::null();
         self.base_addr = 0;
         self.size = 0;
         self.align = 1;
