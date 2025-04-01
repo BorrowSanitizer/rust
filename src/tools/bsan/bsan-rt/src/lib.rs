@@ -24,6 +24,7 @@ pub use bsan_alloc::BsanAllocator;
 #[cfg(test)]
 pub use bsan_alloc::TEST_ALLOC;
 mod shadow;
+use shadow::{Provenance as ShadowProvenance, table_indices};
 
 type AllocID = usize;
 type BorrowTag = usize;
@@ -36,47 +37,27 @@ pub struct Provenance {
     borrow_tag: BorrowTag,
 }
 
-impl shadow::Provenance for Provenance {}
+impl Default for Provenance {
+    fn default() -> Self {
+        Self { lock_address: ptr::null_mut(), alloc_id: 0, borrow_tag: 0 }
+    }
+}
+
+impl ShadowProvenance for Provenance {}
 
 #[no_mangle]
 unsafe extern "C" fn bsan_init(alloc: BsanAllocator) {
     init_global_ctx(alloc);
 }
 
-fn null_prov() -> Provenance {
-    Provenance { lock_address: ptr::null_mut(), alloc_id: 0, borrow_tag: 0 }
-}
 #[no_mangle]
 unsafe extern "C" fn bsan_load_prov(ptr: *mut c_void) -> Provenance {
-    if ptr.is_null() {
-        return null_prov();
-    }
-    let (l1_addr, l2_addr) = table_indices(ptr as usize);
-    let l1 = &global_ctx().shadow_heap.l1;
-    let mut l2 = (*l1.entries)[l1_addr];
-    if l2.is_null() {
-        return null_prov();
-    }
-
-    let prov = (*l2).lookup_mut(l2_addr);
-
-    *prov
+    global_ctx().shadow_heap.load_prov(ptr)
 }
 
 #[no_mangle]
 unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
-    if provenance.is_null() {
-        return;
-    }
-    let (l1_addr, l2_addr) = table_indices(address);
-    let l1 = &global_ctx().shadow_heap.l1;
-    let mut l2 = (*l1.entries)[l1_addr];
-    if l2.is_null() {
-        l2 = &mut L2::new(global_ctx().allocator);
-        (*l1.entries)[l1_addr] = l2;
-    }
-
-    (*(*l2).bytes)[l2_addr] = *provenance;
+    global_ctx().shadow_heap.store_prov(provenance, address);
 }
 
 #[no_mangle]
