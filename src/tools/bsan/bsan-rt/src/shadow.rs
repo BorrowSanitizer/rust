@@ -48,6 +48,12 @@ static L2_LEN: usize = 2_usize.pow(L2_POWER);
 // The number of entries in the first level of the page table
 static L1_LEN: usize = 2_usize.pow(L1_POWER);
 
+// The protection flags for the page tables
+static PROT_SHADOW: i32 = PROT_READ | PROT_WRITE;
+
+// The flags for the page tables
+static MAP_SHADOW: i32 = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
+
 /// Converts an address into a pair of indices into the first and second
 /// levels of the shadow page table.
 #[inline(always)]
@@ -68,11 +74,9 @@ pub fn table_indices(address: usize) -> (usize, usize) {
 // fit within 128 bits and they are not "owned" by any particular object.
 pub trait Provenance: Copy + Sized {}
 
-unsafe impl<T: Provenance> Sync for L2<T> {}
-unsafe impl<T: Provenance> Sync for L1<T> {}
-
 #[repr(C)]
-pub(crate) struct L2<T: Provenance> {
+#[derive(Debug, Copy, Clone, Sync)]
+struct L2<T: Provenance> {
     bytes: *mut [T; L2_LEN],
 }
 
@@ -82,8 +86,8 @@ impl<T: Provenance> L2<T> {
             let l2_void = (allocator.mmap)(
                 core::ptr::null_mut(),
                 size_of::<T>() * L2_LEN,
-                PROT_READ | PROT_WRITE,
-                MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+                PROT_SHADOW,
+                MAP_SHADOW,
                 -1,
                 0,
             );
@@ -104,8 +108,8 @@ impl<T: Provenance> L2<T> {
 }
 
 #[repr(C)]
-#[derive(Debug)]
-pub(crate) struct L1<T: Provenance> {
+#[derive(Debug, Copy, Clone, Sync)]
+struct L1<T: Provenance> {
     entries: *mut [*mut L2<T>; L1_LEN],
 }
 
@@ -115,8 +119,8 @@ impl<T: Provenance> L1<T> {
             let l1_void = (allocator.mmap)(
                 core::ptr::null_mut(),
                 PTR_BYTES * L1_LEN,
-                PROT_READ | PROT_WRITE,
-                MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+                PROT_SHADOW,
+                MAP_SHADOW,
                 -1,
                 0,
             );
@@ -156,7 +160,15 @@ pub struct ShadowHeap<T: Provenance> {
 impl<T: Provenance> Default for ShadowHeap<T> {
     fn default() -> Self {
         let l1 = unsafe {
-            let allocator = global_ctx().allocator;
+            L1::new(global_ctx().allocator)
+        };
+        Self { l1 }
+    }
+}
+
+impl<T: Provenance> ShadowHeap<T> {
+    pub fn new(allocator: BsanAllocator) -> Self {
+        let l1 = unsafe {
             L1::new(allocator)
         };
         Self { l1 }
@@ -177,11 +189,11 @@ impl<T: Provenance> DerefMut for ShadowHeap<T> {
 }
 
 impl<T: Provenance> ShadowHeap<T> {
-    pub unsafe fn load_prov(&mut self, ptr: *mut c_void) -> T {
+    pub unsafe fn load_prov(&mut self, address: usize) -> T {
         if ptr.is_null() {
             return T::default();
         }
-        let (l1_addr, l2_addr) = table_indices(ptr as usize);
+        let (l1_addr, l2_addr) = table_indices(address);
         let mut l2 = (*self.l1.entries)[l1_addr];
         if l2.is_null() {
             return T::default();

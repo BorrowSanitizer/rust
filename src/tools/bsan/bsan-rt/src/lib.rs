@@ -51,8 +51,8 @@ unsafe extern "C" fn bsan_init(alloc: BsanAllocator) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn bsan_load_prov(ptr: *mut c_void) -> Provenance {
-    global_ctx().shadow_heap.load_prov(ptr)
+unsafe extern "C" fn bsan_load_prov(address: usize) -> Provenance {
+    global_ctx().shadow_heap.load_prov(address)
 }
 
 #[no_mangle]
