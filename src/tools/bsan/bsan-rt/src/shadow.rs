@@ -174,7 +174,7 @@ impl<T: Provenance> ShadowHeap<T> {
 }
 
 impl<T: Provenance + Default> ShadowHeap<T> {
-    pub unsafe fn load_prov(& self, address: usize) -> T {
+    pub unsafe fn load_prov(&self, address: usize) -> T {
         let (l1_addr, l2_addr) = table_indices(address);
         let mut l2 = (*self.l1.entries)[l1_addr];
         if l2.is_null() {
@@ -184,7 +184,7 @@ impl<T: Provenance + Default> ShadowHeap<T> {
         *(*l2).lookup_mut(l2_addr)
     }
 
-    pub unsafe fn store_prov(& self, provenance: *const T, address: usize) {
+    pub unsafe fn store_prov(&self, provenance: *const T, address: usize) {
         if provenance.is_null() {
             return;
         }
