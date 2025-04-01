@@ -99,7 +99,6 @@ fn test_store_and_load_prov() {
     let mut heap = ShadowHeap::<TestProv>::default();
     let test_prov = TestProv { value: 42 };
     let addr = 0x1000;
-    
 
     unsafe {
         heap.store_prov(&test_prov, addr);
