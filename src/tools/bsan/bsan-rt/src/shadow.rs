@@ -100,12 +100,8 @@ impl<T: Provenance> L2<T> {
         Self { bytes: l2_bytes }
     }
     #[inline(always)]
-    pub unsafe fn lookup_mut(&mut self, index: usize) -> &mut T {
-        &mut (*self.bytes)[index]
-    }
-    #[inline(always)]
-    pub unsafe fn lookup(&mut self, index: usize) -> &T {
-        &(*self.bytes)[index]
+    pub unsafe fn lookup_mut(&self, index: usize) -> *mut T {
+        &raw mut (*self.bytes)[index]
     }
 }
 
@@ -195,6 +191,7 @@ impl<T: Provenance + Default> ShadowHeap<T> {
             (*self.l1.entries)[l1_addr] = l2;
         }
 
+        // here
         *(*l2).lookup_mut(l2_addr) = *provenance;
     }
 }
