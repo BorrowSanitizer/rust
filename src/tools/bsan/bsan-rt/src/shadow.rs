@@ -75,10 +75,12 @@ pub fn table_indices(address: usize) -> (usize, usize) {
 pub trait Provenance: Copy + Sized {}
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Sync)]
+#[derive(Debug, Copy, Clone)]
 struct L2<T: Provenance> {
     bytes: *mut [T; L2_LEN],
 }
+
+unsafe impl<T: Provenance> Sync for L2<T> {}
 
 impl<T: Provenance> L2<T> {
     pub fn new(allocator: BsanAllocator) -> Self {
@@ -108,10 +110,12 @@ impl<T: Provenance> L2<T> {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Sync)]
+#[derive(Debug, Copy, Clone)]
 struct L1<T: Provenance> {
     entries: *mut [*mut L2<T>; L1_LEN],
 }
+
+unsafe impl<T: Provenance> Sync for L1<T> {}
 
 impl<T: Provenance> L1<T> {
     pub fn new(allocator: BsanAllocator) -> Self {
@@ -169,21 +173,8 @@ impl<T: Provenance> ShadowHeap<T> {
     }
 }
 
-impl<T: Provenance> Deref for ShadowHeap<T> {
-    type Target = L1<T>;
-    fn deref(&self) -> &Self::Target {
-        &self.l1
-    }
-}
-
-impl<T: Provenance> DerefMut for ShadowHeap<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.l1
-    }
-}
-
-impl<T: Provenance> ShadowHeap<T> {
-    pub unsafe fn load_prov(&mut self, address: usize) -> T {
+impl<T: Provenance + Default> ShadowHeap<T> {
+    pub unsafe fn load_prov(& self, address: usize) -> T {
         let (l1_addr, l2_addr) = table_indices(address);
         let mut l2 = (*self.l1.entries)[l1_addr];
         if l2.is_null() {
@@ -193,7 +184,7 @@ impl<T: Provenance> ShadowHeap<T> {
         *(*l2).lookup_mut(l2_addr)
     }
 
-    pub unsafe fn store_prov(&mut self, provenance: *const T, address: usize) {
+    pub unsafe fn store_prov(& self, provenance: *const T, address: usize) {
         if provenance.is_null() {
             return;
         }

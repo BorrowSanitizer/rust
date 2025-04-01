@@ -24,7 +24,7 @@ pub use bsan_alloc::BsanAllocator;
 #[cfg(test)]
 pub use bsan_alloc::TEST_ALLOC;
 mod shadow;
-use shadow::{Provenance as ShadowProvenance, table_indices};
+use shadow::{Provenance as ShadowProvenance, ShadowHeap, table_indices};
 
 type AllocID = usize;
 type BorrowTag = usize;
@@ -52,12 +52,14 @@ unsafe extern "C" fn bsan_init(alloc: BsanAllocator) {
 
 #[no_mangle]
 unsafe extern "C" fn bsan_load_prov(address: usize) -> Provenance {
-    global_ctx().shadow_heap.load_prov(address)
+    let heap = &(*global_ctx()).shadow_heap;
+    heap.load_prov(address)
 }
 
 #[no_mangle]
 unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
-    global_ctx().shadow_heap.store_prov(provenance, address);
+    let heap = &(*global_ctx()).shadow_heap;
+    heap.store_prov(provenance, address);
 }
 
 #[no_mangle]
