@@ -9,6 +9,7 @@ use std::{env, fs, iter};
 
 use clap_complete::shells;
 
+use crate::core::build_steps::bsan::BsanRT;
 use crate::core::build_steps::doc::DocumentationFormat;
 use crate::core::build_steps::synthetic_targets::MirOptPanicAbortSyntheticTarget;
 use crate::core::build_steps::tool::{self, SourceType, Tool};
@@ -469,11 +470,11 @@ pub struct BsanDriver {
 }
 
 impl BsanDriver {
-    /// Run `cargo miri setup` for the given target, return where the Miri sysroot was put.
     pub fn build_bsan_sysroot(
         builder: &Builder<'_>,
         compiler: Compiler,
         target: TargetSelection,
+        bsan_runtime_dir: &PathBuf,
     ) -> PathBuf {
         let bsan_sysroot = builder.out.join(compiler.host).join("bsan-sysroot");
         let mut cargo = builder::Cargo::new(
@@ -489,6 +490,7 @@ impl BsanDriver {
         cargo.env("BSAN_LIB_SRC", builder.src.join("library"));
         // Tell it where to put the sysroot.
         cargo.env("BSAN_SYSROOT", &bsan_sysroot);
+        cargo.env("BSAN_RT_SYSROOT", bsan_runtime_dir);
 
         let mut cargo = BootstrapCommand::from(cargo);
         let _guard =
@@ -528,18 +530,29 @@ impl Step for BsanDriver {
         let host = builder.build.build;
         let target = self.target;
         let stage = builder.top_stage;
-        if stage == 0 {
-            eprintln!("bsan cannot be tested at stage 0");
+
+        // Miri can only be tested at stage N for N > 0 because it relies on having
+        // the stage N-1 compiler built to ensure that rustc and rustdoc are the
+        // same. We have the additional restriction that the BSAN runtime must be built,
+        // and the earliest this happens is in stage 1. This means that we are limited to testing
+        // at stage 2, since that's the only way we can ensure that the Stage N-1 sysroot contains
+        // the bsan runtime.
+        if stage < 2 {
+            eprintln!("BSAN can only be tested at stage 2");
             std::process::exit(1);
         }
-
         // This compiler runs on the host, we'll just use it for the target.
         let target_compiler = builder.compiler(stage, host);
+
         // Similar to `compile::Assemble`, build with the previous stage's compiler. Otherwise
         // we'd have stageN/bin/rustc and stageN/bin/rustdoc be effectively different stage
         // compilers, which isn't what we want. Rustdoc should be linked in the same way as the
         // rustc compiler it's paired with, so it must be built with the previous stage compiler.
         let host_compiler = builder.compiler(stage - 1, host);
+
+        // We need the BSAN runtime to be available so that we can
+        // build our instrumented sysroot.
+        builder.ensure(BsanRT { compiler: host_compiler, target: host });
 
         // Build our tools.
         let bsan_driver = builder.ensure(tool::BsanDriver {
@@ -547,19 +560,27 @@ impl Step for BsanDriver {
             target: host,
             extra_features: Vec::new(),
         });
-        // the ui tests also assume cargo-miri has been built
+
+        // the ui tests also assume cargo-bsan has been built
         builder.ensure(tool::CargoBsan {
             compiler: host_compiler,
             target: host,
             extra_features: Vec::new(),
         });
 
-        // We also need sysroots, for Miri and for the host (the latter for build scripts).
+        // We also need sysroots, for BSAN and for the host (the latter for build scripts).
         // This is for the tests so everything is done with the target compiler.
-        let bsan_sysroot = BsanDriver::build_bsan_sysroot(builder, target_compiler, target);
+        let bsan_sysroot = BsanDriver::build_bsan_sysroot(
+            builder,
+            target_compiler,
+            target,
+            &builder.sysroot(host_compiler),
+        );
+
         builder.ensure(compile::Std::new(target_compiler, host));
         let host_sysroot = builder.sysroot(target_compiler);
-        // Miri has its own "target dir" for ui test dependencies. Make sure it gets cleared when
+
+        // BSAN has its own "target dir" for ui test dependencies. Make sure it gets cleared when
         // the sysroot gets rebuilt, to avoid "found possibly newer version of crate `std`" errors.
         if !builder.config.dry_run() {
             let ui_test_dep_dir = builder.stage_out(host_compiler, Mode::ToolStd).join("bsan_ui");
@@ -570,7 +591,7 @@ impl Step for BsanDriver {
         }
 
         // Run `cargo test`.
-        // This is with the Miri crate, so it uses the host compiler.
+        // This is with the bsan-driver crate, so it uses the host compiler.
         let mut cargo = tool::prepare_tool_cargo(
             builder,
             host_compiler,
@@ -584,13 +605,23 @@ impl Step for BsanDriver {
 
         cargo.add_rustc_lib_path(builder);
 
-        // We can NOT use `run_cargo_test` since Miri's integration tests do not use the usual test
+        // We can NOT use `run_cargo_test` since BSAN's integration tests do not use the usual test
         // harness and therefore do not understand the flags added by `add_flags_and_try_run_test`.
         let mut cargo = prepare_cargo_test(cargo, &[], &[], "bsan", host_compiler, host, builder);
 
-        // miri tests need to know about the stage sysroot
+        // bsan tests need to know about the stage sysroot
+
         cargo.env("BSAN_SYSROOT", &bsan_sysroot);
         cargo.env("BSAN_HOST_SYSROOT", &host_sysroot);
+
+        // Since our runtime is build with the Stage N-1 compiler,
+        // we need to tell BSAN to search for it separately in the StageN-1
+        // sysroot. This is only necessary for platforms where the runtime
+        // is a dynamically linked library; otherwise, the StageN-1 compiler
+        // used by bsan-driver will link against the runtime in the that
+        // sysroot automatically.
+
+        cargo.env("BSAN_RT_SYSROOT", &builder.sysroot(host_compiler));
         cargo.env("BSAN", &bsan_driver);
 
         // Set the target.
@@ -600,28 +631,6 @@ impl Step for BsanDriver {
             let _time = helpers::timeit(builder);
             cargo.run(builder);
         }
-        /*
-        if builder.config.test_args().is_empty() {
-            cargo.env("MIRIFLAGS", "-O -Zmir-opt-level=4 -Cdebug-assertions=yes");
-            // Optimizations can change backtraces
-            cargo.env("MIRI_SKIP_UI_CHECKS", "1");
-            // `MIRI_SKIP_UI_CHECKS` and `RUSTC_BLESS` are incompatible
-            cargo.env_remove("RUSTC_BLESS");
-            // Optimizations can change error locations and remove UB so don't run `fail` tests.
-            cargo.args(["tests/pass", "tests/panic"]);
-
-            {
-                let _guard = builder.msg_sysroot_tool(
-                    Kind::Test,
-                    stage,
-                    "miri (mir-opt-level 4)",
-                    host,
-                    target,
-                );
-                let _time = helpers::timeit(builder);
-                cargo.run(builder);
-            }
-        }*/
     }
 }
 
