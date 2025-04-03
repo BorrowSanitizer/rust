@@ -2,6 +2,7 @@ use core::alloc::Layout;
 use core::ffi::c_void;
 use core::marker::PhantomData;
 use core::ops::{Add, BitAnd, Deref, DerefMut, Shr};
+use core::ptr::NonNull;
 use core::slice::SliceIndex;
 use core::{mem, ptr};
 
@@ -100,8 +101,8 @@ impl<T: Provenance> L2<T> {
         Self { bytes: l2_bytes }
     }
     #[inline(always)]
-    pub unsafe fn lookup_mut(&self, index: usize) -> *mut T {
-        &raw mut (*self.bytes)[index]
+    pub unsafe fn lookup(&self, l2_index: usize) -> *mut T {
+        &raw mut (*self.bytes)[l2_index]
     }
 }
 
@@ -131,20 +132,6 @@ impl<T: Provenance> L1<T> {
         };
 
         Self { entries: l1_entries }
-    }
-
-    #[inline(always)]
-    unsafe fn lookup_mut(&mut self, index: usize) -> Option<&mut T> {
-        let (l1_index, l2_index) = table_indices(index);
-        let l2 = (*self.entries)[l1_index];
-        if l2.is_null() { None } else { Some((*l2).lookup_mut(l2_index)) }
-    }
-
-    #[inline(always)]
-    unsafe fn lookup(&mut self, index: usize) -> Option<&T> {
-        let (l1_index, l2_index) = table_indices(index);
-        let l2 = (*self.entries)[l1_index];
-        if l2.is_null() { None } else { Some((*l2).lookup(l2_index)) }
     }
 }
 
@@ -177,7 +164,7 @@ impl<T: Provenance + Default> ShadowHeap<T> {
             return T::default();
         }
 
-        *(*l2).lookup_mut(l2_addr)
+        *(*l2).lookup(l2_addr)
     }
 
     pub unsafe fn store_prov(&self, provenance: *const T, address: usize) {
@@ -192,6 +179,117 @@ impl<T: Provenance + Default> ShadowHeap<T> {
         }
 
         // here
-        *(*l2).lookup_mut(l2_addr) = *provenance;
+        *(*l2).lookup(l2_addr) = *provenance;
     }
+}
+
+mod tests {
+    use core::ptr::{null, null_mut};
+
+    use libc::{MAP_ANONYMOUS, MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
+    
+    use crate::BsanAllocator;
+    use crate::shadow::*;
+    
+    #[derive(Debug, Copy, Clone)]
+    struct TestProv {
+        value: u8,
+    }
+    
+    impl Default for TestProv {
+        fn default() -> Self {
+            Self { value: 0 }
+        }
+    }
+    
+    impl Provenance for TestProv {}
+    
+    #[test]
+    fn test_table_indices() {
+        let addr = 0x1234_5678;
+        let (l1, l2) = table_indices(addr);
+        assert!(l1 < L1_LEN);
+        assert!(l2 < L2_LEN);
+    }
+    
+    #[test]
+    fn test_l2_creation() {
+        let allocator = BsanAllocator {
+            mmap: |addr, size, prot, flags, fd, offset| {
+                assert!(addr.is_null());
+                assert!(size > 0);
+                assert_eq!(prot, PROT_READ | PROT_WRITE);
+                assert_eq!(flags, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE);
+                assert_eq!(fd, -1);
+                assert_eq!(offset, 0);
+                // Return a dummy pointer for testing
+                addr
+            },
+            malloc: |size| {
+                assert!(size > 0);
+                null_mut()
+            },
+            free: |ptr| {
+                assert!(!ptr.is_null());
+            },
+            munmap: |ptr, size| {
+                assert!(!ptr.is_null());
+                assert!(size > 0);
+            },
+        };
+        let _l2 = L2::<TestProv>::new(allocator);
+    }
+    
+    #[test]
+    fn test_l1_creation() {
+        let allocator = BsanAllocator {
+            mmap: |addr, size, prot, flags, fd, offset| {
+                assert!(addr.is_null());
+                assert!(size > 0);
+                assert_eq!(prot, PROT_READ | PROT_WRITE);
+                assert_eq!(flags, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE);
+                assert_eq!(fd, -1);
+                assert_eq!(offset, 0);
+                // Return a dummy pointer for testing
+                addr
+            },
+            malloc: |size| {
+                assert!(size > 0);
+                null_mut()
+            },
+            free: |ptr| {
+                assert!(!ptr.is_null());
+            },
+            munmap: |ptr, size| {
+                assert!(!ptr.is_null());
+                assert!(size > 0);
+            },
+        };
+        let _l1 = L1::<TestProv>::new(allocator);
+    }
+    
+    #[test]
+    fn test_shadow_heap_creation() {
+        let _heap = ShadowHeap::<TestProv>::default();
+    }
+    
+    #[test]
+    fn test_load_null_prov() {
+        let mut heap = ShadowHeap::<TestProv>::default();
+        let prov = unsafe { heap.load_prov(null()) };
+        assert_eq!(prov.value, 0);
+    }
+    
+    #[test]
+    fn test_store_and_load_prov() {
+        let mut heap = ShadowHeap::<TestProv>::default();
+        let test_prov = TestProv { value: 42 };
+        let addr = 0x1000;
+    
+        unsafe {
+            heap.store_prov(&test_prov, addr);
+            let loaded_prov = heap.load_prov(addr as *mut c_void);
+            assert_eq!(loaded_prov.value, test_prov.value);
+        }
+    }    
 }
