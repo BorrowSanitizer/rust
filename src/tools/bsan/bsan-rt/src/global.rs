@@ -27,13 +27,18 @@ use crate::*;
 pub struct GlobalCtx {
     hooks: BsanHooks,
     next_alloc_id: AtomicUsize,
+    next_thread_id: AtomicUsize,
 }
 
 impl GlobalCtx {
     /// Creates a new instance of `GlobalCtx` using the given `BsanHooks`.
     /// This function will also initialize our shadow heap
     fn new(hooks: BsanHooks) -> Self {
-        Self { hooks, next_alloc_id: AtomicUsize::new(1) }
+        Self {
+            hooks,
+            next_alloc_id: AtomicUsize::new(AllocId::min().get()),
+            next_thread_id: AtomicUsize::new(0),
+        }
     }
 
     fn alloc(&self) -> BsanAllocHooks {
@@ -44,6 +49,15 @@ impl GlobalCtx {
         unsafe { (self.hooks.exit)() }
     }
 
+    pub fn new_thread_id(&self) -> ThreadId {
+        let id = self.next_thread_id.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        ThreadId::new(id)
+    }
+
+    pub fn new_alloc_id(&self) -> AllocId {
+        let id = self.next_alloc_id.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        AllocId::new(id)
+    }
     /// Prints a given set of formatted arguments. This function is not meant
     /// to be called directly; instead, it should be used with the `print!`,
     /// `println!`, and `ui_test!` macros.
