@@ -38,9 +38,7 @@ impl<T> Drop for Block<T> {
         // SAFETY: our munmap pointer will be valid by construction of the GlobalCtx.
         // We can safely transmute it to c_void since that's what it was originally when
         // it was allocated by mmap
-        let success = unsafe {
-            (self.munmap)(mem::transmute(self.base.as_ptr()), self.size.get())
-        };
+        let success = unsafe { (self.munmap)(mem::transmute(self.base.as_ptr()), self.size.get()) };
         if success != 0 {
             panic!("Failed to unmap block!");
         }
@@ -138,10 +136,12 @@ impl<T: Linkable<T>> BlockAllocator<T> {
 
 #[cfg(test)]
 mod test {
-    use std::{sync::Arc, thread};
+    use std::sync::Arc;
+    use std::thread;
+
+    use super::*;
     use crate::global::test::TEST_HOOKS;
     use crate::*;
-    use super::*;
     struct Link {
         link: UnsafeCell<*mut u8>,
     }
