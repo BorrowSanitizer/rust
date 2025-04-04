@@ -79,12 +79,12 @@ impl GlobalCtx {
     }
 
     pub fn new_thread_id(&self) -> ThreadId {
-        let id = self.next_thread_id.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        let id = self.next_thread_id.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         ThreadId::new(id)
     }
 
     pub fn new_alloc_id(&self) -> AllocId {
-        let id = self.next_alloc_id.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        let id = self.next_alloc_id.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         AllocId::new(id)
     }
     /// Prints a given set of formatted arguments. This function is not meant
