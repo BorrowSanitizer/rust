@@ -98,7 +98,7 @@ impl<T: Linkable<T>> BlockAllocator<T> {
             }
         };
         self.cursor
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
                 if val.is_null() {
                     // We have reached the end of the block
                     None
