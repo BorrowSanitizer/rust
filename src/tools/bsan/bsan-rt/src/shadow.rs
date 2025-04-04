@@ -16,19 +16,17 @@ use crate::Provenance;
 /// implement this yet, though, so we can use target_pointer_width.
 
 #[cfg(target_pointer_width = "64")]
-static VA_BITS: usize = 48;
+static VA_BITS: u32 = 48;
 
 #[cfg(target_pointer_width = "32")]
-static VA_BITS: usize = 32;
-
-#[cfg(target_pointer_width = "16")]
-static VA_BITS: usize = 16;
+static VA_BITS: u32 = 32;
 
 // The number of bytes in a pointer
 static PTR_BYTES: usize = mem::size_of::<usize>();
 
-// The number of addressable, word-aligned, pointer-sized chunks
-static NUM_ADDR_CHUNKS: u32 = VA_BITS.strict_div(PTR_BYTES).ilog2();
+// 2^NUM_ADDR_CHUNKS is the number of addressable, pointer-sized,
+// word-aligned chunks.
+static NUM_ADDR_CHUNKS: u32 = VA_BITS - (PTR_BYTES.ilog2());
 
 // We have 2^L2_POWER entries in the second level of the page table
 // Adding 1 ensures that we have more second-level entries than first
