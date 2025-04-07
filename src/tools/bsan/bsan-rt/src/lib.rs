@@ -21,15 +21,8 @@ use core::{fmt, mem, ptr};
 
 mod global;
 pub use global::*;
-
-mod bsan_alloc;
-pub use bsan_alloc::BsanAllocator;
-#[cfg(test)]
-pub use bsan_alloc::TEST_ALLOC;
 mod shadow;
 use shadow::{Provenance as ShadowProvenance, ShadowHeap, table_indices};
-
-
 
 pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, c_ulonglong) -> *mut c_void;
 pub type MUnmap = unsafe extern "C" fn(*mut c_void, usize) -> i32;
@@ -74,22 +67,6 @@ unsafe impl Allocator for BsanAllocHooks {
         (self.free)(mem::transmute(ptr.as_ptr()))
     }
 }
-
-#[no_mangle]
-unsafe extern "C" fn bsan_load_prov(address: usize) -> Provenance {
-    let heap = &(*global_ctx()).shadow_heap;
-    heap.load_prov(address)
-}
-
-#[no_mangle]
-unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
-    let heap = &(*global_ctx()).shadow_heap;
-    heap.store_prov(provenance, address);
-}
-
-#[no_mangle]
-extern "C" fn bsan_expose_tag(ptr: *mut c_void) {}
-
 
 /// Unique identifier for an allocation
 #[repr(transparent)]
@@ -267,17 +244,16 @@ extern "C" fn bsan_shadow_clear(addr: usize, access_size: usize) {}
 /// Loads the provenance of a given address from shadow memory and stores
 /// the result in the return pointer.
 #[no_mangle]
-extern "C" fn bsan_load_prov(prov: *mut MaybeUninit<Provenance>, addr: usize) {
-    debug_assert!(prov != ptr::null_mut());
-    unsafe {
-        (*prov).write(Provenance::null());
-    }
+unsafe extern "C" fn bsan_load_prov(address: usize) -> Provenance {
+    let heap = &(*global_ctx()).shadow_heap;
+    heap.load_prov(address)
 }
 
 /// Stores the given provenance value into shadow memory at the location for the given address.
 #[no_mangle]
-extern "C" fn bsan_store_prov(prov: *const Provenance, addr: usize) {
-    debug_assert!(prov != ptr::null_mut());
+unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
+    let heap = &(*global_ctx()).shadow_heap;
+    heap.store_prov(provenance, address);
 }
 
 /// Pushes a shadow stack frame
@@ -326,3 +302,8 @@ extern "C" fn bsan_expose_tag(prov: *const Provenance) {
 fn panic(info: &PanicInfo<'_>) -> ! {
     loop {}
 }
+
+
+/// TODO: Other Implementation instead of storing provenance directly in L2, we set provenance equal to provenance object - where do we alloc?
+/// When we free, make sure to cleanup the provenance pointer
+/// also make sure 
