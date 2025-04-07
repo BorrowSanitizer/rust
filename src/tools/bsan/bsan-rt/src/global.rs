@@ -1,14 +1,18 @@
+#![feature(allocator_api)]
+#![feature(unsafe_cell_access)]
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use core::cell::SyncUnsafeCell;
+use core::cell::{SyncUnsafeCell, UnsafeCell};
 use core::ffi::CStr;
 use core::fmt;
 use core::fmt::{Write, write};
-use core::mem::{self, zeroed};
+use core::mem::{self, MaybeUninit, zeroed};
+use core::num::NonZeroUsize;
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
-use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
+use block::*;
 use hashbrown::{DefaultHashBuilder, HashMap};
 use rustc_hash::FxBuildHasher;
 
@@ -30,6 +34,9 @@ pub struct GlobalCtx {
     next_thread_id: AtomicUsize,
 }
 
+const BSAN_MMAP_PROT: i32 = libc::PROT_READ | libc::PROT_WRITE;
+const BSAN_MMAP_FLAGS: i32 = libc::MAP_ANONYMOUS | libc::MAP_PRIVATE;
+
 impl GlobalCtx {
     /// Creates a new instance of `GlobalCtx` using the given `BsanHooks`.
     /// This function will also initialize our shadow heap
@@ -41,7 +48,29 @@ impl GlobalCtx {
         }
     }
 
-    fn alloc(&self) -> BsanAllocHooks {
+    pub fn new_block<T>(&self, num_elements: NonZeroUsize) -> Block<T> {
+        let layout = Layout::array::<T>(num_elements.into()).unwrap();
+        let size = NonZeroUsize::new(layout.size()).unwrap();
+        let base = unsafe {
+            (self.hooks.mmap)(
+                ptr::null_mut(),
+                layout.size(),
+                BSAN_MMAP_PROT,
+                BSAN_MMAP_FLAGS,
+                -1,
+                0,
+            )
+        };
+
+        if base.is_null() {
+            panic!("Allocation failed");
+        }
+        let base = unsafe { NonNull::new_unchecked(mem::transmute(base)) };
+        let munmap = self.hooks.munmap;
+        Block { size, base, munmap }
+    }
+
+    fn allocator(&self) -> BsanAllocHooks {
         self.hooks.alloc
     }
 
@@ -50,12 +79,12 @@ impl GlobalCtx {
     }
 
     pub fn new_thread_id(&self) -> ThreadId {
-        let id = self.next_thread_id.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        let id = self.next_thread_id.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         ThreadId::new(id)
     }
 
     pub fn new_alloc_id(&self) -> AllocId {
-        let id = self.next_alloc_id.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        let id = self.next_alloc_id.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         AllocId::new(id)
     }
     /// Prints a given set of formatted arguments. This function is not meant
@@ -127,7 +156,7 @@ impl<T> DerefMut for BVec<T> {
 
 impl<T> BVec<T> {
     fn new(ctx: &GlobalCtx) -> Self {
-        unsafe { Self(Vec::new_in(ctx.alloc())) }
+        unsafe { Self(Vec::new_in(ctx.allocator())) }
     }
 }
 
@@ -166,7 +195,7 @@ impl<T> DerefMut for BVecDeque<T> {
 
 impl<T> BVecDeque<T> {
     fn new(ctx: &GlobalCtx) -> Self {
-        unsafe { Self(VecDeque::new_in(ctx.alloc())) }
+        unsafe { Self(VecDeque::new_in(ctx.allocator())) }
     }
 }
 
@@ -193,7 +222,7 @@ impl<K, V> DerefMut for BHashMap<K, V> {
 
 impl<K, V> BHashMap<K, V> {
     fn new(ctx: &GlobalCtx) -> Self {
-        unsafe { Self(HashMap::with_hasher_in(FxBuildHasher, ctx.alloc())) }
+        unsafe { Self(HashMap::with_hasher_in(FxBuildHasher, ctx.allocator())) }
     }
 }
 
@@ -220,15 +249,16 @@ mod global_alloc {
     static GLOBAL_ALLOCATOR: DummyAllocator = DummyAllocator;
 }
 
-pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalCtx>> = SyncUnsafeCell::new(None);
+pub static GLOBAL_CTX: SyncUnsafeCell<MaybeUninit<GlobalCtx>> =
+    SyncUnsafeCell::new(MaybeUninit::uninit());
 
 /// Initializes the global context object.
 /// This function must only be called once: when the program is first initialized.
 /// It is marked as `unsafe`, because it relies on the set of function pointers in
 /// `BsanHooks` to be valid.
 #[inline]
-pub unsafe fn init_global_ctx(hooks: BsanHooks) -> &'static GlobalCtx {
-    *GLOBAL_CTX.get() = Some(GlobalCtx::new(hooks));
+pub unsafe fn init_global_ctx(hooks: BsanHooks) -> *mut GlobalCtx {
+    (*GLOBAL_CTX.get()).write(GlobalCtx::new(hooks));
     global_ctx()
 }
 
@@ -238,19 +268,20 @@ pub unsafe fn init_global_ctx(hooks: BsanHooks) -> &'static GlobalCtx {
 /// on the assumption that this function has not been called yet.
 #[inline]
 pub unsafe fn deinit_global_ctx() {
-    drop((&mut *GLOBAL_CTX.get()).take());
+    drop(ptr::replace(GLOBAL_CTX.get(), MaybeUninit::uninit()).assume_init());
 }
 
 /// Accessing the global context is unsafe since the user needs to ensure that
 /// the context is initialized, e.g. `bsan_init` has been called and `bsan_deinit`
 /// has not yet been called.
 #[inline]
-pub unsafe fn global_ctx() -> &'static GlobalCtx {
-    (&(*GLOBAL_CTX.get())).as_ref().unwrap_unchecked()
+pub unsafe fn global_ctx() -> *mut GlobalCtx {
+    let ctx: *mut MaybeUninit<GlobalCtx> = GLOBAL_CTX.get();
+    mem::transmute(ctx)
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::*;
 
     unsafe extern "C" fn test_print(ptr: *const c_char) {
