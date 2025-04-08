@@ -8,6 +8,7 @@
 #![allow(unused)]
 
 extern crate alloc;
+use alloc::boxed::Box;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::ffi::{c_char, c_ulonglong, c_void};
@@ -19,7 +20,14 @@ use core::ptr::NonNull;
 use core::{fmt, mem, ptr};
 
 mod global;
-pub use global::*;
+
+use global::*;
+
+mod tree_borrows;
+use log::debug;
+use tree_borrows::tree_borrows_wrapper as TreeBorrows;
+
+use crate::ui_test;
 
 mod local;
 pub use local::*;
@@ -27,7 +35,44 @@ pub use local::*;
 mod block;
 mod shadow;
 
-pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, c_ulonglong) -> *mut c_void;
+// Atomic counter to assign unique IDs to each allocation
+static ALLOC_COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// This is the metadata stored with each allocation
+#[derive(Debug)]
+struct AllocMetadata {
+    alloc_id: AllocId,
+    tree_address: Box<TreeBorrows::Tree, BsanAllocHooks>,
+}
+
+/// Pointers have provenance (RFC #3559). In Tree Borrows, this includes an allocation ID
+/// and a borrow tag. We also include a pointer to the "lock" location for the allocation,
+/// which contains all other metadata used to detect undefined behavior.
+
+#[repr(C)]
+struct Provenance {
+    pub alloc_id: AllocId,
+    pub borrow_tag: TreeBorrows::BorrowTag,
+    pub lock_address: *const AllocMetadata,
+}
+impl Provenance {
+    /// The default provenance value, which is assigned to dangling or invalid
+    /// pointers.
+    const fn null() -> Self {
+        Provenance { alloc_id: AllocId::null(), borrow_tag: 0, lock_address: ptr::null() }
+    }
+
+    /// Pointers cast from integers receive a "wildcard" provenance value, which permits
+    /// any access.
+    const fn wildcard() -> Self {
+        Provenance { alloc_id: AllocId::wildcard(), borrow_tag: 0, lock_address: ptr::null() }
+    }
+}
+
+//#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, u64) -> *mut c_void;
+//#[cfg(not(all(target_arch = "aarch64", target_os = "linux")))]
+//pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, c_ulonglong) -> *mut c_void;
 pub type MUnmap = unsafe extern "C" fn(*mut c_void, usize) -> i32;
 pub type Malloc = unsafe extern "C" fn(usize) -> *mut c_void;
 pub type Free = unsafe extern "C" fn(*mut c_void);
@@ -148,39 +193,6 @@ impl fmt::Debug for BorTag {
 /// of the actions that lead to an aliasing violation.
 pub type Span = usize;
 
-/// Pointers have provenance (RFC #3559). In Tree Borrows, this includes an allocation ID
-/// and a borrow tag. We also include a pointer to the "lock" location for the allocation,
-/// which contains all other metadata used to detect undefined behavior.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Provenance {
-    pub alloc_id: AllocId,
-    pub bor_tag: BorTag,
-    pub alloc_info: *mut c_void,
-}
-
-impl Provenance {
-    /// The default provenance value, which is assigned to dangling or invalid
-    /// pointers.
-    const fn null() -> Self {
-        Provenance {
-            alloc_id: AllocId::null(),
-            bor_tag: BorTag::new(0),
-            alloc_info: core::ptr::null_mut(),
-        }
-    }
-
-    /// Pointers cast from integers receive a "wildcard" provenance value, which permits
-    /// any access.
-    const fn wildcard() -> Self {
-        Provenance {
-            alloc_id: AllocId::wildcard(),
-            bor_tag: BorTag::new(0),
-            alloc_info: core::ptr::null_mut(),
-        }
-    }
-}
-
 /// Every allocation is associated with a "lock" object, which is an instance of `AllocInfo`.
 /// Provenance is the "key" to this lock. To validate a memory access, we compare the allocation ID
 /// of a pointer's provenance with the value stored in its corresponding `AllocInfo` object. If the values
@@ -237,6 +249,7 @@ extern "C" fn bsan_retag(span: Span, prov: *mut Provenance, retag_kind: u8, plac
 /// Records a read access of size `access_size` at the given address `addr` using the provenance `prov`.
 #[no_mangle]
 extern "C" fn bsan_read(span: Span, prov: *const Provenance, addr: usize, access_size: u64) {}
+
 
 /// Records a write access of size `access_size` at the given address `addr` using the provenance `prov`.
 #[no_mangle]
@@ -304,4 +317,55 @@ extern "C" fn bsan_expose_tag(prov: *const Provenance) {}
 #[panic_handler]
 fn panic(info: &PanicInfo<'_>) -> ! {
     loop {}
+}
+
+#[cfg(test)]
+mod test {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::mem::MaybeUninit;
+    use core::ptr::NonNull;
+
+    use super::*;
+    use crate::global::test::TEST_HOOKS;
+
+    #[test]
+    fn bsan_malloc_alloc_id() {
+        let bsan_test_hooks = TEST_HOOKS.clone();
+        unsafe {
+            bsan_init(bsan_test_hooks);
+            let mut prov1 = MaybeUninit::<Provenance>::uninit();
+            bsan_malloc(0xaaaaaaaa as *const c_void, 10, prov1.as_mut_ptr());
+            let prov1 = prov1.assume_init();
+            assert_eq!(prov1.alloc_id.get(), 1);
+
+            let mut prov2 = MaybeUninit::<Provenance>::uninit();
+            bsan_malloc(0xbbbbbbbb as *const c_void, 10, prov2.as_mut_ptr());
+            let prov2 = prov2.assume_init();
+            assert_eq!(prov2.alloc_id.get(), 2);
+        }
+    }
+
+    #[test]
+    fn bsan_malloc_allocmetadata_persistance() {
+        let bsan_test_hooks = TEST_HOOKS.clone();
+        unsafe {
+            bsan_init(bsan_test_hooks);
+            let mut prov1 = MaybeUninit::<Provenance>::uninit();
+            bsan_malloc(0xaaaaaaaa as *const c_void, 10, prov1.as_mut_ptr());
+            debug!("directly after bsan_malloc");
+            let prov1 = prov1.assume_init();
+
+            let prov_alloc_id = prov1.alloc_id;
+            let alloc_metadata = prov1.lock_address as *const AllocMetadata;
+            log::info!(
+                "About to drop provenance. The alloc_metadata behind the lock address should be available afterward: {:?}",
+                *alloc_metadata
+            );
+            drop(prov1);
+            log::info!("Provenance dropped, alloc metadata is: {:?}", *alloc_metadata);
+
+            let alloc_metadata = &*alloc_metadata;
+            assert_eq!(alloc_metadata.alloc_id, prov_alloc_id);
+        }
+    }
 }

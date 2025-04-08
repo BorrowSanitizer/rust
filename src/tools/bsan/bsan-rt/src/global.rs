@@ -30,6 +30,8 @@ use crate::*;
 #[derive(Debug)]
 pub struct GlobalCtx {
     hooks: BsanHooks,
+    // TODO(obraunsdorf): Does the counter need to be AtomicU64, because it would weaken security
+    // with a counter that wraps around often if we are on fewer-bit architectures?
     next_alloc_id: AtomicUsize,
     next_thread_id: AtomicUsize,
 }
@@ -281,7 +283,7 @@ pub unsafe fn global_ctx() -> *mut GlobalCtx {
 }
 
 #[cfg(test)]
-pub mod test {
+pub(crate) mod test {
     use crate::*;
 
     unsafe extern "C" fn test_print(ptr: *const c_char) {
