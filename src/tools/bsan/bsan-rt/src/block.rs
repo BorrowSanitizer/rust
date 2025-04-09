@@ -11,7 +11,7 @@ use crate::*;
 /// of a singly-linked list. For this implementation to be sound,
 /// the pointer that is returned must not be mutated concurrently.
 pub unsafe trait Linkable<T: Sized> {
-    fn next(&self) -> *mut *mut T;
+    fn next(&mut self) -> *mut *mut T;
 }
 
 /// An mmap-ed chunk of memory that will munmap the chunk on drop.
@@ -67,7 +67,7 @@ unsafe impl<T: Linkable<T>> Sync for BlockAllocator<T> {}
 
 impl<T: Linkable<T>> BlockAllocator<T> {
     /// Initializes a BlockAllocator for the given block.
-    fn new(block: Block<T>) -> Self {
+    pub fn new(block: Block<T>) -> Self {
         BlockAllocator {
             // we begin at the high-end of the block and decrement downward
             cursor: AtomicPtr::new(block.last() as *mut MaybeUninit<T>),
@@ -80,7 +80,7 @@ impl<T: Linkable<T>> BlockAllocator<T> {
     /// Allocates a new instance from the block.
     /// If a prior allocation has been freed, it will be reused instead of
     /// incrementing the internal cursor.
-    fn alloc(&self) -> Option<NonNull<MaybeUninit<T>>> {
+    pub fn alloc(&self) -> Option<NonNull<MaybeUninit<T>>> {
         if !self.free_lock.swap(true, Ordering::Acquire) {
             let curr = unsafe { *self.free_list.get() };
             let curr = if !curr.is_null() {
@@ -147,7 +147,7 @@ mod test {
     }
 
     unsafe impl Linkable<Link> for Link {
-        fn next(&self) -> *mut *mut Link {
+        fn next(&mut self) -> *mut *mut Link {
             unsafe { mem::transmute(self.link.get()) }
         }
     }

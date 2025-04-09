@@ -1,7 +1,14 @@
 pub(super) mod tree_borrows_wrapper {
     use core::ffi::c_void;
     pub type BorrowTag = u64;
+    use alloc::boxed::Box;
+
     use log::debug;
+
+    #[derive(Debug)]
+    pub enum TreeBorrowsError {
+        InvalidAccess,
+    }
 
     #[derive(Debug)]
     pub struct Tree {}
@@ -12,6 +19,18 @@ pub(super) mod tree_borrows_wrapper {
 
         pub fn get_root_borrow_tag(&self) -> BorrowTag {
             0
+        }
+
+        pub fn deallocate(
+            &mut self,
+            object_address: *const c_void,
+            borrow_tag: BorrowTag,
+        ) -> Result<(), TreeBorrowsError> {
+            debug!(
+                "Invalidating tree for object allocation at {:p} with borrow tag {}",
+                object_address, borrow_tag
+            );
+            Ok(())
         }
     }
 

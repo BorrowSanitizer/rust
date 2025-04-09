@@ -19,6 +19,8 @@ use core::panic::PanicInfo;
 use core::ptr::NonNull;
 use core::{fmt, mem, ptr};
 
+use block::Linkable;
+
 mod global;
 
 use global::*;
@@ -38,11 +40,44 @@ mod shadow;
 // Atomic counter to assign unique IDs to each allocation
 static ALLOC_COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
+union FreeListAddrUnion {
+    free_list_next: *mut AllocMetadata,
+    base_addr: *const c_void,
+}
+
+impl core::fmt::Debug for FreeListAddrUnion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        unsafe { write!(f, "{:?}", self.base_addr) }
+    }
+}
+
 /// This is the metadata stored with each allocation
 #[derive(Debug)]
-struct AllocMetadata {
+pub struct AllocMetadata {
     alloc_id: AllocId,
+    base_addr: FreeListAddrUnion,
     tree_address: Box<TreeBorrows::Tree, BsanAllocHooks>,
+}
+
+unsafe impl Linkable<AllocMetadata> for AllocMetadata {
+    fn next(&mut self) -> *mut *mut AllocMetadata {
+        // we are re-using the space of base_addr to store the free list pointer
+        // SAFETY: this is safe because both union fields are raw pointers
+        unsafe { core::ptr::addr_of_mut!(self.base_addr.free_list_next) }
+    }
+}
+
+impl AllocMetadata {
+    fn base_addr(&self) -> *const c_void {
+        // SAFETY: this is safe because both union fields are raw pointers
+        unsafe { self.base_addr.base_addr }
+    }
+
+    fn dealloc(&mut self, borrow_tag: TreeBorrows::BorrowTag) {
+        self.alloc_id = AllocId::invalid();
+        self.tree_address.deallocate(self.base_addr(), borrow_tag);
+        //TODO(obraunsdorf) free the allocation of the tree itself
+    }
 }
 
 /// Pointers have provenance (RFC #3559). In Tree Borrows, this includes an allocation ID
@@ -59,7 +94,7 @@ impl Provenance {
     /// The default provenance value, which is assigned to dangling or invalid
     /// pointers.
     const fn null() -> Self {
-        Provenance { alloc_id: AllocId::null(), borrow_tag: 0, lock_address: ptr::null() }
+        Provenance { alloc_id: AllocId::invalid(), borrow_tag: 0, lock_address: ptr::null() }
     }
 
     /// Pointers cast from integers receive a "wildcard" provenance value, which permits
@@ -129,7 +164,7 @@ impl AllocId {
         self.0
     }
     /// An invalid allocation
-    pub const fn null() -> Self {
+    pub const fn invalid() -> Self {
         AllocId(0)
     }
 
@@ -193,32 +228,6 @@ impl fmt::Debug for BorTag {
 /// of the actions that lead to an aliasing violation.
 pub type Span = usize;
 
-/// Every allocation is associated with a "lock" object, which is an instance of `AllocInfo`.
-/// Provenance is the "key" to this lock. To validate a memory access, we compare the allocation ID
-/// of a pointer's provenance with the value stored in its corresponding `AllocInfo` object. If the values
-/// do not match, then the access is invalid. If they do match, then we proceed to validate the access against
-/// the tree for the allocation.
-#[repr(C)]
-struct AllocInfo {
-    pub alloc_id: AllocId,
-    pub base_addr: usize,
-    pub size: usize,
-    pub align: usize,
-    pub tree: *mut c_void,
-}
-
-impl AllocInfo {
-    /// When we deallocate an allocation, we need to invalidate its metadata.
-    /// so that any uses-after-free are detectable.
-    fn dealloc(&mut self) {
-        self.alloc_id = AllocId::null();
-        self.base_addr = 0;
-        self.size = 0;
-        self.align = 1;
-        // FIXME: free the tree
-    }
-}
-
 /// Initializes the global state of the runtime library.
 /// The safety of this library is entirely dependent on this
 /// function having been executed. We assume the global invariant that
@@ -249,7 +258,6 @@ extern "C" fn bsan_retag(span: Span, prov: *mut Provenance, retag_kind: u8, plac
 /// Records a read access of size `access_size` at the given address `addr` using the provenance `prov`.
 #[no_mangle]
 extern "C" fn bsan_read(span: Span, prov: *const Provenance, addr: usize, access_size: u64) {}
-
 
 /// Records a write access of size `access_size` at the given address `addr` using the provenance `prov`.
 #[no_mangle]
@@ -288,12 +296,37 @@ extern "C" fn bsan_push_frame(span: Span) {}
 #[no_mangle]
 extern "C" fn bsan_pop_frame(span: Span) {}
 
-// Registers a heap allocation of size `size`
+/// Creates metadata for a heap allocation of the application.
+/// (out:) `prov` is a pointer for returning the provenance (pointer metadata) for this allocation.
+/// `span` is a ID to trace back to the source code location of the allocation
+/// `object_address` is the address of the allocated object
+/// `alloc_size` is the size of the allocated object
+/// # Safety
+///  The caller must ensure that `bsan_aalloc()` is only called after `bsan_init()` has
+///  been called to initialize the global context, esp. the allocator and mmap hooks.
+
 #[no_mangle]
-extern "C" fn bsan_alloc(span: Span, prov: *mut MaybeUninit<Provenance>, addr: usize) {
-    unsafe {
-        (*prov).write(Provenance::null());
-    }
+unsafe extern "C" fn bsan_alloc(
+    span: Span,
+    prov: *mut MaybeUninit<Provenance>,
+    object_address: *const c_void,
+    alloc_size: usize,
+) {
+    debug_assert!(prov != ptr::null_mut());
+    let ctx = &*global_ctx();
+    let alloc_hooks = ctx.allocator();
+
+    let tree = Box::new_in(TreeBorrows::Tree::new(object_address, alloc_size), alloc_hooks);
+    let root_borrow_tag = tree.get_root_borrow_tag();
+    let alloc_id = ctx.new_alloc_id();
+    let mut lock_location = ctx.allocate_lock_location();
+    let alloc_metadata = AllocMetadata {
+        alloc_id,
+        base_addr: FreeListAddrUnion { base_addr: object_address },
+        tree_address: tree,
+    };
+    let lock_address = lock_location.as_mut().write(alloc_metadata) as *const AllocMetadata;
+    (*prov).write(Provenance { alloc_id, borrow_tag: root_borrow_tag, lock_address });
 }
 
 /// Registers a stack allocation of size `size`.
@@ -305,8 +338,25 @@ extern "C" fn bsan_alloc_stack(span: Span, prov: *mut MaybeUninit<Provenance>, s
 }
 
 /// Deregisters a heap allocation
+/// # Safety
+/// Mutating alloc_metadata (i.e. deallocating the tree, and invalidating alloc_id) through the provencance
+/// metadata (which is copy) is only thread-safe, if the application itself is thread-safe.
+/// BSAN is not ensuring thread-safety here
+/// if the
 #[no_mangle]
-extern "C" fn bsan_dealloc(span: Span, prov: *mut Provenance) {}
+unsafe extern "C" fn bsan_dealloc(span: Span, prov: *mut Provenance) {
+    let prov = &mut *prov;
+    let ctx = &*global_ctx();
+    let alloc_metadata = &mut *(prov.lock_address as *mut AllocMetadata);
+    if (alloc_metadata.alloc_id.get() != prov.alloc_id.get()) {
+        panic!(
+            "Allocation ID in pointer metadata ({}) does not match the one in the lock address ({})",
+            prov.alloc_id.get(),
+            alloc_metadata.alloc_id.get()
+        );
+    }
+    alloc_metadata.dealloc(prov.borrow_tag);
+}
 
 /// Marks the borrow tag for `prov` as "exposed," allowing it to be resolved to
 /// validate accesses through "wildcard" pointers.
@@ -334,14 +384,17 @@ mod test {
         unsafe {
             bsan_init(bsan_test_hooks);
             let mut prov1 = MaybeUninit::<Provenance>::uninit();
-            bsan_malloc(0xaaaaaaaa as *const c_void, 10, prov1.as_mut_ptr());
+            let span1 = 42;
+            let prov1_ptr = (&mut prov1) as *mut _;
+            bsan_alloc(span1, prov1_ptr, 0xaaaaaaaa as *const c_void, 10);
             let prov1 = prov1.assume_init();
-            assert_eq!(prov1.alloc_id.get(), 1);
-
+            assert_eq!(prov1.alloc_id.get(), 3);
+            let span2 = 43;
             let mut prov2 = MaybeUninit::<Provenance>::uninit();
-            bsan_malloc(0xbbbbbbbb as *const c_void, 10, prov2.as_mut_ptr());
+            let prov2_ptr = (&mut prov2) as *mut _;
+            bsan_alloc(span2, prov2_ptr, 0xaaaaaaaa as *const c_void, 10);
             let prov2 = prov2.assume_init();
-            assert_eq!(prov2.alloc_id.get(), 2);
+            assert_eq!(prov2.alloc_id.get(), 4);
         }
     }
 
@@ -351,7 +404,9 @@ mod test {
         unsafe {
             bsan_init(bsan_test_hooks);
             let mut prov1 = MaybeUninit::<Provenance>::uninit();
-            bsan_malloc(0xaaaaaaaa as *const c_void, 10, prov1.as_mut_ptr());
+            let prov1_ptr = (&mut prov1) as *mut _;
+            let span1 = 42;
+            bsan_alloc(span1, prov1_ptr, 0xaaaaaaaa as *const c_void, 10);
             debug!("directly after bsan_malloc");
             let prov1 = prov1.assume_init();
 

@@ -34,6 +34,7 @@ pub struct GlobalCtx {
     // with a counter that wraps around often if we are on fewer-bit architectures?
     next_alloc_id: AtomicUsize,
     next_thread_id: AtomicUsize,
+    alloc_metadata_map: BlockAllocator<AllocMetadata>,
 }
 
 const BSAN_MMAP_PROT: i32 = libc::PROT_READ | libc::PROT_WRITE;
@@ -43,36 +44,50 @@ impl GlobalCtx {
     /// Creates a new instance of `GlobalCtx` using the given `BsanHooks`.
     /// This function will also initialize our shadow heap
     fn new(hooks: BsanHooks) -> Self {
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let alloc_metadata_size = mem::size_of::<AllocMetadata>();
+        debug_assert!(0 < alloc_metadata_size && alloc_metadata_size <= page_size);
+        //let num_elements = NonZeroUsize::new(page_size / mem::size_of::<AllocMetadata>()).unwrap();
+        let num_elements = NonZeroUsize::new(1024).unwrap();
+        let block = Self::generate_block(hooks.mmap, hooks.munmap, num_elements);
         Self {
             hooks,
             next_alloc_id: AtomicUsize::new(AllocId::min().get()),
             next_thread_id: AtomicUsize::new(0),
+            alloc_metadata_map: BlockAllocator::new(block),
         }
     }
 
-    pub fn new_block<T>(&self, num_elements: NonZeroUsize) -> Block<T> {
+    pub(crate) unsafe fn allocate_lock_location(&self) -> NonNull<MaybeUninit<AllocMetadata>> {
+        match self.alloc_metadata_map.alloc() {
+            Some(a) => a,
+            None => {
+                log::error!("Failed to allocate lock location");
+                panic!("Failed to allocate lock location");
+            }
+        }
+    }
+
+    fn generate_block<T>(mmap: MMap, munmap: MUnmap, num_elements: NonZeroUsize) -> Block<T> {
         let layout = Layout::array::<T>(num_elements.into()).unwrap();
         let size = NonZeroUsize::new(layout.size()).unwrap();
         let base = unsafe {
-            (self.hooks.mmap)(
-                ptr::null_mut(),
-                layout.size(),
-                BSAN_MMAP_PROT,
-                BSAN_MMAP_FLAGS,
-                -1,
-                0,
-            )
+            (mmap)(ptr::null_mut(), layout.size(), BSAN_MMAP_PROT, BSAN_MMAP_FLAGS, -1, 0)
         };
 
         if base.is_null() {
             panic!("Allocation failed");
         }
         let base = unsafe { NonNull::new_unchecked(mem::transmute(base)) };
-        let munmap = self.hooks.munmap;
+        let munmap = munmap;
         Block { size, base, munmap }
     }
 
-    fn allocator(&self) -> BsanAllocHooks {
+    pub fn new_block<T>(&self, num_elements: NonZeroUsize) -> Block<T> {
+        Self::generate_block(self.hooks.mmap, self.hooks.munmap, num_elements)
+    }
+
+    pub(crate) fn allocator(&self) -> BsanAllocHooks {
         self.hooks.alloc
     }
 
