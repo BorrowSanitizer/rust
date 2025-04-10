@@ -27,6 +27,8 @@ pub use local::*;
 mod block;
 mod shadow;
 
+mod borrow_tracker;
+
 pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, c_ulonglong) -> *mut c_void;
 pub type MUnmap = unsafe extern "C" fn(*mut c_void, usize) -> i32;
 pub type Malloc = unsafe extern "C" fn(usize) -> *mut c_void;
