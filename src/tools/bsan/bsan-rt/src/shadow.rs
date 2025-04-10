@@ -11,8 +11,7 @@ use core::{mem, ptr};
 use libc::{MAP_ANONYMOUS, MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
 
 use crate::global::{GlobalCtx, global_ctx};
-use crate::BsanAllocHooks;
-use crate::BsanHooks;
+use crate::{BsanAllocHooks, BsanHooks};
 /// Different targets have a different number
 /// of significant bits in their pointer representation.
 /// On 32-bit platforms, all 32-bits are addressable. Most
@@ -81,14 +80,8 @@ unsafe impl<T> Sync for L2<T> {}
 impl<T> L2<T> {
     pub fn new(allocator: &BsanHooks, addr: *mut c_void) -> Self {
         let mut l2_bytes: *mut [T; L2_LEN] = unsafe {
-            let l2_void = (allocator.mmap)(
-                addr,
-                size_of::<T>() * L2_LEN,
-                PROT_SHADOW,
-                MAP_SHADOW,
-                -1,
-                0,
-            );
+            let l2_void =
+                (allocator.mmap)(addr, size_of::<T>() * L2_LEN, PROT_SHADOW, MAP_SHADOW, -1, 0);
             assert!(l2_void != core::ptr::null_mut() || l2_void != -1isize as (*mut c_void));
             ptr::write_bytes(l2_void as *mut u8, 0, size_of::<T>() * L2_LEN);
             mem::transmute(l2_void)
@@ -97,7 +90,6 @@ impl<T> L2<T> {
         Self { bytes: l2_bytes }
     }
 
-    
     #[inline(always)]
     pub unsafe fn lookup(&self, l2_index: usize) -> *mut T {
         &raw mut (*self.bytes)[l2_index]
@@ -183,32 +175,36 @@ impl<T: Default + Copy> ShadowHeap<T> {
 
 #[cfg(test)]
 mod tests {
+    use core::ffi::{c_char, c_ulonglong, c_void};
     use core::ptr::{null, null_mut};
-    use core::ffi::{c_void, c_char, c_ulonglong};
 
     use libc::{self, MAP_ANONYMOUS, MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
 
-    use crate::BsanHooks;
+    use crate::global::{deinit_global_ctx, init_global_ctx};
     use crate::shadow::*;
-    use crate::BsanAllocHooks;
-    use crate::{MMap, MUnmap, Malloc, Free, Print, Exit};
-    use crate::global::{init_global_ctx, deinit_global_ctx};
+    use crate::{BsanAllocHooks, BsanHooks, Exit, Free, MMap, MUnmap, Malloc, Print};
 
     unsafe extern "C" fn test_print(_: *const c_char) {}
-    unsafe extern "C" fn test_exit() -> ! { std::process::exit(0) }
+    unsafe extern "C" fn test_exit() -> ! {
+        std::process::exit(0)
+    }
 
     const TEST_HOOKS: BsanHooks = BsanHooks {
-        alloc: BsanAllocHooks {
-            malloc: libc::malloc as Malloc,
-            free: libc::free as Free,
-        },
+        alloc: BsanAllocHooks { malloc: libc::malloc as Malloc, free: libc::free as Free },
         mmap: test_mmap,
         munmap: test_munmap,
         print: test_print,
         exit: test_exit,
     };
 
-    unsafe extern "C" fn test_mmap(addr: *mut c_void, size: usize, prot: i32, flags: i32, fd: i32, offset: c_ulonglong) -> *mut c_void {
+    unsafe extern "C" fn test_mmap(
+        addr: *mut c_void,
+        size: usize,
+        prot: i32,
+        flags: i32,
+        fd: i32,
+        offset: c_ulonglong,
+    ) -> *mut c_void {
         libc::mmap(addr, size, prot, flags, fd, offset as i64)
     }
 
@@ -228,11 +224,15 @@ mod tests {
     }
 
     fn setup() {
-        unsafe { init_global_ctx(&TEST_HOOKS); }
+        unsafe {
+            init_global_ctx(&TEST_HOOKS);
+        }
     }
 
     fn teardown() {
-        unsafe { deinit_global_ctx(); }
+        unsafe {
+            deinit_global_ctx();
+        }
     }
 
     #[test]

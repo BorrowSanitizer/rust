@@ -34,7 +34,11 @@ impl GlobalCtx {
     /// Creates a new instance of `GlobalCtx` using the given `BsanHooks`.
     /// This function will also initialize our shadow heap
     fn new(hooks: &BsanHooks) -> Self {
-        Self { hooks: hooks.clone(), next_alloc_id: AtomicUsize::new(1), shadow_heap: ShadowHeap::new(hooks) }
+        Self {
+            hooks: hooks.clone(),
+            next_alloc_id: AtomicUsize::new(1),
+            shadow_heap: ShadowHeap::new(hooks),
+        }
     }
 
     fn alloc(&self) -> &BsanAllocHooks {
