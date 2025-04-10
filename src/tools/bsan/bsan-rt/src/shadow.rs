@@ -23,19 +23,19 @@ use crate::BsanHooks;
 /// implement this yet, though, so we can use target_pointer_width.
 
 #[cfg(target_pointer_width = "64")]
-static VA_BITS: usize = 48;
+static VA_BITS: u32 = 48;
 
 #[cfg(target_pointer_width = "32")]
-static VA_BITS: usize = 32;
+static VA_BITS: u32 = 32;
 
 #[cfg(target_pointer_width = "16")]
-static VA_BITS: usize = 16;
+static VA_BITS: u32 = 16;
 
 // The number of bytes in a pointer
 static PTR_BYTES: usize = mem::size_of::<usize>();
 
 // The number of addressable, word-aligned, pointer-sized chunks
-static NUM_ADDR_CHUNKS: u32 = VA_BITS.strict_div(PTR_BYTES).ilog2();
+static NUM_ADDR_CHUNKS: u32 = VA_BITS - (PTR_BYTES.ilog2());
 
 // We have 2^L2_POWER entries in the second level of the page table
 // Adding 1 ensures that we have more second-level entries than first
@@ -61,15 +61,12 @@ static MAP_SHADOW: i32 = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
 /// levels of the shadow page table.
 #[inline(always)]
 pub fn table_indices(address: usize) -> (usize, usize) {
-    println!("address: {}", address);
     #[cfg(target_endian = "little")]
     let l1_index = address.shr(L2_POWER).bitand((L1_POWER - 1) as usize);
-    println!("l1_index: {}", l1_index);
     #[cfg(target_endian = "big")]
     let l1_index = address.shl(L2_POWER).bitand((L1_POWER - 1) as usize);
 
     let l2_index = address.bitand((L2_POWER - 1) as usize);
-    println!("l2_index: {}", l2_index);
     (l1_index, l2_index)
 }
 
@@ -159,10 +156,7 @@ impl<T> ShadowHeap<T> {
 
 impl<T: Default + Copy> ShadowHeap<T> {
     pub unsafe fn load_prov(&self, address: usize) -> T {
-        println!("address: {}", address);
         let (l1_addr, l2_addr) = table_indices(address);
-        println!("l1_addr: {}", l1_addr);
-        println!("l2_addr: {}", l2_addr);
         let mut l2 = (*self.l1.entries)[l1_addr];
         if l2.is_null() {
             return T::default();
@@ -176,14 +170,10 @@ impl<T: Default + Copy> ShadowHeap<T> {
             return;
         }
         let (l1_addr, l2_addr) = table_indices(address);
-        println!("l1_addr: {}", l1_addr);
-        println!("l2_addr: {}", l2_addr);
         let mut l2 = (*self.l1.entries)[l1_addr];
-        println!("l2: {:?}", l2);
         if l2.is_null() {
             let l2_addr = unsafe { (*self.l1.entries).as_ptr().add(l1_addr) as *mut c_void };
             l2 = &mut L2::new(global_ctx().hooks(), l2_addr);
-            println!("l2: {:?}", l2);
             (*self.l1.entries)[l1_addr] = l2;
         }
 
@@ -283,7 +273,6 @@ mod tests {
 
     #[test]
     fn test_store_and_load_prov() {
-        println!("test_store_and_load_prov");
         setup();
         let heap = ShadowHeap::<TestProv>::default();
         let test_prov = TestProv { value: 42 };
@@ -291,9 +280,7 @@ mod tests {
         let addr = 0x1234_5678_1234_5678;
 
         unsafe {
-            println!("storing");
             // heap.store_prov(&test_prov, addr);
-            println!("stored");
             let loaded_prov = heap.load_prov(addr);
             // assert_eq!(loaded_prov.value, test_prov.value);
         }
