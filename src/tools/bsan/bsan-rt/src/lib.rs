@@ -258,16 +258,17 @@ extern "C" fn bsan_shadow_clear(addr: usize, access_size: usize) {}
 /// Loads the provenance of a given address from shadow memory and stores
 /// the result in the return pointer.
 #[no_mangle]
-extern "C" fn bsan_load_prov(prov: *mut MaybeUninit<Provenance>, addr: usize) {
-    unsafe {
-        (*prov).write(Provenance::null());
-    }
+unsafe extern "C" fn bsan_load_prov(prov: *mut Provenance, address: usize) {
+    let result = global_ctx().shadow_heap().load_prov(address);
+    *prov = result;
 }
 
 /// Stores the given provenance value into shadow memory at the location for the given address.
 #[no_mangle]
-extern "C" fn bsan_store_prov(prov: *const Provenance, addr: usize) {}
-
+unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
+    let heap = &(*global_ctx()).shadow_heap();
+    heap.store_prov(provenance, address);
+}
 /// Pushes a shadow stack frame
 #[no_mangle]
 extern "C" fn bsan_push_frame(span: Span) {}
