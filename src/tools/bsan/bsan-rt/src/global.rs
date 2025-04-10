@@ -27,17 +27,26 @@ use crate::*;
 pub struct GlobalCtx {
     hooks: BsanHooks,
     next_alloc_id: AtomicUsize,
+    shadow_heap: ShadowHeap<Provenance>,
 }
 
 impl GlobalCtx {
     /// Creates a new instance of `GlobalCtx` using the given `BsanHooks`.
     /// This function will also initialize our shadow heap
-    fn new(hooks: BsanHooks) -> Self {
-        Self { hooks, next_alloc_id: AtomicUsize::new(1) }
+    fn new(hooks: &BsanHooks) -> Self {
+        Self { hooks: hooks.clone(), next_alloc_id: AtomicUsize::new(1), shadow_heap: ShadowHeap::new(hooks) }
     }
 
-    fn alloc(&self) -> BsanAllocHooks {
-        self.hooks.alloc
+    fn alloc(&self) -> &BsanAllocHooks {
+        &self.hooks.alloc
+    }
+
+    pub fn shadow_heap(&self) -> &ShadowHeap<Provenance> {
+        &self.shadow_heap
+    }
+
+    pub fn hooks(&self) -> &BsanHooks {
+        &self.hooks
     }
 
     fn exit(&self) -> ! {
@@ -113,7 +122,7 @@ impl<T> DerefMut for BVec<T> {
 
 impl<T> BVec<T> {
     fn new(ctx: &GlobalCtx) -> Self {
-        unsafe { Self(Vec::new_in(ctx.alloc())) }
+        unsafe { Self(Vec::new_in(*ctx.alloc())) }
     }
 }
 
@@ -152,7 +161,7 @@ impl<T> DerefMut for BVecDeque<T> {
 
 impl<T> BVecDeque<T> {
     fn new(ctx: &GlobalCtx) -> Self {
-        unsafe { Self(VecDeque::new_in(ctx.alloc())) }
+        unsafe { Self(VecDeque::new_in(*ctx.alloc())) }
     }
 }
 
@@ -179,7 +188,7 @@ impl<K, V> DerefMut for BHashMap<K, V> {
 
 impl<K, V> BHashMap<K, V> {
     fn new(ctx: &GlobalCtx) -> Self {
-        unsafe { Self(HashMap::with_hasher_in(FxBuildHasher, ctx.alloc())) }
+        unsafe { Self(HashMap::with_hasher_in(FxBuildHasher, *ctx.alloc())) }
     }
 }
 
@@ -213,7 +222,7 @@ pub static GLOBAL_CTX: SyncUnsafeCell<Option<GlobalCtx>> = SyncUnsafeCell::new(N
 /// It is marked as `unsafe`, because it relies on the set of function pointers in
 /// `BsanHooks` to be valid.
 #[inline]
-pub unsafe fn init_global_ctx(hooks: BsanHooks) -> &'static GlobalCtx {
+pub unsafe fn init_global_ctx(hooks: &BsanHooks) -> &'static GlobalCtx {
     *GLOBAL_CTX.get() = Some(GlobalCtx::new(hooks));
     global_ctx()
 }

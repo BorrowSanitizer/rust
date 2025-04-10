@@ -22,7 +22,7 @@ use core::{fmt, mem, ptr};
 mod global;
 pub use global::*;
 mod shadow;
-use shadow::{Provenance as ShadowProvenance, ShadowHeap, table_indices};
+use shadow::{ShadowHeap, table_indices};
 
 pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, c_ulonglong) -> *mut c_void;
 pub type MUnmap = unsafe extern "C" fn(*mut c_void, usize) -> i32;
@@ -70,7 +70,7 @@ unsafe impl Allocator for BsanAllocHooks {
 
 /// Unique identifier for an allocation
 #[repr(transparent)]
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct AllocId(usize);
 
 impl AllocId {
@@ -108,7 +108,7 @@ impl fmt::Debug for AllocId {
 
 /// Unique identifier for a node within the tree
 #[repr(transparent)]
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct BorTag(usize);
 
 impl BorTag {
@@ -135,19 +135,23 @@ pub type Span = usize;
 /// and a borrow tag. We also include a pointer to the "lock" location for the allocation,
 /// which contains all other metadata used to detect undefined behavior.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Provenance {
     pub alloc_id: AllocId,
     pub bor_tag: BorTag,
     pub alloc_info: *mut c_void,
 }
 
-impl ShadowProvenance for Provenance {}
+impl Default for Provenance {
+    fn default() -> Self {
+        Self::null()
+    }
+}
 
 impl Provenance {
     /// The default provenance value, which is assigned to dangling or invalid
     /// pointers.
-    const fn null() -> Self {
+    pub const fn null() -> Self {
         Provenance {
             alloc_id: AllocId::null(),
             bor_tag: BorTag::new(0),
@@ -157,7 +161,7 @@ impl Provenance {
 
     /// Pointers cast from integers receive a "wildcard" provenance value, which permits
     /// any access.
-    const fn wildcard() -> Self {
+    pub const fn wildcard() -> Self {
         Provenance {
             alloc_id: AllocId::wildcard(),
             bor_tag: BorTag::new(0),
@@ -198,7 +202,7 @@ impl AllocInfo {
 /// no other API functions will be called prior to that point.
 #[no_mangle]
 unsafe extern "C" fn bsan_init(hooks: BsanHooks) {
-    let ctx = init_global_ctx(hooks);
+    let ctx = init_global_ctx(&hooks);
     ui_test!(ctx, "bsan_init");
 }
 
@@ -244,15 +248,15 @@ extern "C" fn bsan_shadow_clear(addr: usize, access_size: usize) {}
 /// Loads the provenance of a given address from shadow memory and stores
 /// the result in the return pointer.
 #[no_mangle]
-unsafe extern "C" fn bsan_load_prov(address: usize) -> Provenance {
-    let heap = &(*global_ctx()).shadow_heap;
-    heap.load_prov(address)
+unsafe extern "C" fn bsan_load_prov(prov: *mut Provenance, address: usize) {
+    let result = global_ctx().shadow_heap().load_prov(address);
+    *prov = result;
 }
 
 /// Stores the given provenance value into shadow memory at the location for the given address.
 #[no_mangle]
 unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
-    let heap = &(*global_ctx()).shadow_heap;
+    let heap = &(*global_ctx()).shadow_heap();
     heap.store_prov(provenance, address);
 }
 
@@ -302,8 +306,3 @@ extern "C" fn bsan_expose_tag(prov: *const Provenance) {
 fn panic(info: &PanicInfo<'_>) -> ! {
     loop {}
 }
-
-
-/// TODO: Other Implementation instead of storing provenance directly in L2, we set provenance equal to provenance object - where do we alloc?
-/// When we free, make sure to cleanup the provenance pointer
-/// also make sure 
