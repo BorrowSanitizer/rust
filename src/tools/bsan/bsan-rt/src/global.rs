@@ -32,6 +32,7 @@ pub struct GlobalCtx {
     hooks: BsanHooks,
     next_alloc_id: AtomicUsize,
     next_thread_id: AtomicUsize,
+    shadow_heap: ShadowHeap<Provenance>,
 }
 
 const BSAN_MMAP_PROT: i32 = libc::PROT_READ | libc::PROT_WRITE;
@@ -45,7 +46,12 @@ impl GlobalCtx {
             hooks,
             next_alloc_id: AtomicUsize::new(AllocId::min().get()),
             next_thread_id: AtomicUsize::new(0),
+            shadow_heap: ShadowHeap::new(hooks),
         }
+    }
+
+    pub fn shadow_heap(&self) -> &ShadowHeap<Provenance> {
+        &self.shadow_heap
     }
 
     pub fn new_block<T>(&self, num_elements: NonZeroUsize) -> Block<T> {
