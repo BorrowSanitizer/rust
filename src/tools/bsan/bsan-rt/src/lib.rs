@@ -8,14 +8,12 @@
 #![allow(unused)]
 
 extern crate alloc;
-use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
-use core::ffi::{c_char, c_ulonglong, c_void};
+use core::ffi::c_void;
 use core::mem::MaybeUninit;
 use core::num::NonZero;
 #[cfg(not(test))]
 use core::panic::PanicInfo;
-use core::ptr::NonNull;
 use core::{fmt, mem, ptr};
 
 mod global;
@@ -27,49 +25,11 @@ pub use local::*;
 mod block;
 mod shadow;
 
-pub type MMap = unsafe extern "C" fn(*mut c_void, usize, i32, i32, i32, c_ulonglong) -> *mut c_void;
-pub type MUnmap = unsafe extern "C" fn(*mut c_void, usize) -> i32;
-pub type Malloc = unsafe extern "C" fn(usize) -> *mut c_void;
-pub type Free = unsafe extern "C" fn(*mut c_void);
-pub type Print = unsafe extern "C" fn(*const c_char);
-pub type Exit = unsafe extern "C" fn() -> !;
+mod hooks;
+pub use hooks::*;
 
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct BsanHooks {
-    alloc: BsanAllocHooks,
-    mmap: MMap,
-    munmap: MUnmap,
-    print: Print,
-    exit: Exit,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct BsanAllocHooks {
-    malloc: Malloc,
-    free: Free,
-}
-
-unsafe impl Allocator for BsanAllocHooks {
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        unsafe {
-            match layout.size() {
-                0 => Ok(NonNull::slice_from_raw_parts(layout.dangling(), 0)),
-                // SAFETY: `layout` is non-zero in size,
-                size => unsafe {
-                    let raw_ptr: *mut u8 = mem::transmute((self.malloc)(layout.size()));
-                    let ptr = NonNull::new(raw_ptr).ok_or(AllocError)?;
-                    Ok(NonNull::slice_from_raw_parts(ptr, size))
-                },
-            }
-        }
-    }
-
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, _layout: Layout) {
-        (self.free)(mem::transmute(ptr.as_ptr()))
-    }
-}
+const WILDCARD_PROVENANCE: Provenance = Provenance::wildcard();
+const NULL_PROVENANCE: Provenance = Provenance::null();
 
 /// Unique identifier for an allocation
 #[repr(transparent)]
@@ -143,11 +103,6 @@ impl fmt::Debug for BorTag {
     }
 }
 
-/// Unique identifier for a source location. Every update to the tree
-/// is associated with a `Span`, which allows us to provide a detailed history
-/// of the actions that lead to an aliasing violation.
-pub type Span = usize;
-
 /// Pointers have provenance (RFC #3559). In Tree Borrows, this includes an allocation ID
 /// and a borrow tag. We also include a pointer to the "lock" location for the allocation,
 /// which contains all other metadata used to detect undefined behavior.
@@ -207,12 +162,17 @@ impl AllocInfo {
     }
 }
 
+/// Unique identifier for a source location. Every update to the tree
+/// is associated with a `Span`, which allows us to provide a detailed history
+/// of the actions that lead to an aliasing violation.
+pub type Span = usize;
+
 /// Initializes the global state of the runtime library.
 /// The safety of this library is entirely dependent on this
 /// function having been executed. We assume the global invariant that
 /// no other API functions will be called prior to that point.
 #[no_mangle]
-unsafe extern "C" fn bsan_init(hooks: BsanHooks) {
+unsafe extern "C" fn bsan_init(hooks: Hooks) {
     let ctx = init_global_ctx(hooks);
     let ctx = unsafe { &*ctx };
     init_local_ctx(ctx);

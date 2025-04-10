@@ -14,37 +14,6 @@ pub unsafe trait Linkable<T: Sized> {
     fn next(&self) -> *mut *mut T;
 }
 
-/// An mmap-ed chunk of memory that will munmap the chunk on drop.
-#[derive(Debug)]
-pub struct Block<T: Sized> {
-    pub size: NonZeroUsize,
-    pub base: NonNull<T>,
-    pub munmap: MUnmap,
-}
-
-impl<T: Sized> Block<T> {
-    /// The last valid, addressable location within the block (at its high-end)
-    fn last(&self) -> *mut T {
-        unsafe { self.base.as_ptr().add(self.size.get() - 1) }
-    }
-    /// The first valid, addressable location within the block (at its low-end)
-    fn first(&self) -> *mut T {
-        self.base.as_ptr()
-    }
-}
-
-impl<T> Drop for Block<T> {
-    fn drop(&mut self) {
-        // SAFETY: our munmap pointer will be valid by construction of the GlobalCtx.
-        // We can safely transmute it to c_void since that's what it was originally when
-        // it was allocated by mmap
-        let success = unsafe { (self.munmap)(mem::transmute(self.base.as_ptr()), self.size.get()) };
-        if success != 0 {
-            panic!("Failed to unmap block!");
-        }
-    }
-}
-
 /// A fixed-capacity, semi-lock-free, thread-safe bump-allocator.
 #[derive(Debug)]
 pub struct BlockAllocator<T: Linkable<T>> {
@@ -56,6 +25,8 @@ pub struct BlockAllocator<T: Linkable<T>> {
     free_list: UnsafeCell<*mut T>,
     /// A mutex for the free list
     free_lock: AtomicBool,
+    /// The hooks that will be used to allocate the block.
+    pub(crate) hooks: MMapHooks,
     /// The block of memory where instances are allocated from.
     block: Block<T>,
 }
@@ -67,12 +38,14 @@ unsafe impl<T: Linkable<T>> Sync for BlockAllocator<T> {}
 
 impl<T: Linkable<T>> BlockAllocator<T> {
     /// Initializes a BlockAllocator for the given block.
-    fn new(block: Block<T>) -> Self {
+    fn new(hooks: MMapHooks, count: usize) -> Self {
+        let block = hooks.block::<T>(count);
         BlockAllocator {
             // we begin at the high-end of the block and decrement downward
             cursor: AtomicPtr::new(block.last() as *mut MaybeUninit<T>),
             free_list: UnsafeCell::new(core::ptr::null::<T>() as *mut T),
             free_lock: AtomicBool::new(false),
+            hooks,
             block,
         }
     }
@@ -140,8 +113,9 @@ mod test {
     use std::thread;
 
     use super::*;
-    use crate::global::test::TEST_HOOKS;
+    use crate::test::TEST_HOOKS;
     use crate::*;
+
     struct Link {
         link: UnsafeCell<*mut u8>,
     }
@@ -154,12 +128,8 @@ mod test {
 
     #[test]
     fn allocate_from_page_in_parallel() {
-        let ctx = unsafe { init_global_ctx(TEST_HOOKS.clone()) };
-        let ctx = unsafe { &*ctx };
-        let block = ctx.new_block::<Link>(unsafe { NonZero::new_unchecked(200) });
-        let page = Arc::new(BlockAllocator::<Link>::new(block));
+        let page = Arc::new(BlockAllocator::<Link>::new(TEST_HOOKS.mmap, 200));
         let mut threads = Vec::new();
-
         for id in 0..10 {
             let page = page.clone();
             // Create 10 threads, which will each allocate and deallocate from the page
@@ -195,10 +165,6 @@ mod test {
         }
         for thread in threads {
             thread.join().unwrap();
-        }
-
-        unsafe {
-            deinit_global_ctx();
         }
     }
 }

@@ -8,4 +8,4 @@ cpp_compat = true
 
 [parse]
 parse_deps = true
-include = ["src/lib.rs"]  
+include = ["src/lib.rs", "src/hooks.rs"]  
