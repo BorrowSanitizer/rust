@@ -153,12 +153,18 @@ pub type Span = usize;
 /// and a borrow tag. We also include a pointer to the "lock" location for the allocation,
 /// which contains all other metadata used to detect undefined behavior.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Provenance {
     pub alloc_id: AllocId,
     pub bor_tag: BorTag,
     pub alloc_info: *mut c_void,
 }
+
+impl Default for Provenance {
+    fn default() -> Self {
+        Provenance::null()
+    }
+}   
 
 impl Provenance {
     /// The default provenance value, which is assigned to dangling or invalid
@@ -259,14 +265,14 @@ extern "C" fn bsan_shadow_clear(addr: usize, access_size: usize) {}
 /// the result in the return pointer.
 #[no_mangle]
 unsafe extern "C" fn bsan_load_prov(prov: *mut Provenance, address: usize) {
-    let result = global_ctx().shadow_heap().load_prov(address);
+    let result = (*global_ctx()).shadow_heap().load_prov(address);
     *prov = result;
 }
 
 /// Stores the given provenance value into shadow memory at the location for the given address.
 #[no_mangle]
 unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
-    let heap = &(*global_ctx()).shadow_heap();
+    let heap = (*global_ctx()).shadow_heap();
     heap.store_prov(provenance, address);
 }
 /// Pushes a shadow stack frame

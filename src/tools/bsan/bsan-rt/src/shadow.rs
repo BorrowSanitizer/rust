@@ -133,9 +133,9 @@ pub struct ShadowHeap<T> {
     l1: L1<T>,
 }
 
-impl<T: Default + Copy> Default for ShadowHeap<T> {
+impl<T> Default for ShadowHeap<T> {
     fn default() -> Self {
-        Self { l1: unsafe { L1::new(global_ctx().hooks()) } }
+        Self { l1: unsafe { L1::new((*global_ctx()).hooks()) } }
     }
 }
 
@@ -145,7 +145,8 @@ impl<T> ShadowHeap<T> {
     }
 }
 
-impl<T: Default + Copy> ShadowHeap<T> {
+impl<T : Default + Copy> ShadowHeap<T> {
+
     pub unsafe fn load_prov(&self, address: usize) -> T {
         let (l1_addr, l2_addr) = table_indices(address);
         let mut l2 = (*self.l1.entries)[l1_addr];
@@ -164,7 +165,7 @@ impl<T: Default + Copy> ShadowHeap<T> {
         let mut l2 = (*self.l1.entries)[l1_addr];
         if l2.is_null() {
             let l2_addr = unsafe { (*self.l1.entries).as_ptr().add(l1_addr) as *mut c_void };
-            l2 = &mut L2::new(global_ctx().hooks(), l2_addr);
+            l2 = &mut L2::new((*global_ctx()).hooks(), l2_addr);
             (*self.l1.entries)[l1_addr] = l2;
         }
 

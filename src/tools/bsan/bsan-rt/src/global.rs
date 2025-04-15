@@ -17,6 +17,7 @@ use hashbrown::{DefaultHashBuilder, HashMap};
 use rustc_hash::FxBuildHasher;
 
 use crate::*;
+use crate::shadow::ShadowHeap;
 
 /// Every action that requires a heap allocation must be performed through a globally
 /// accessible, singleton instance of `GlobalCtx`. Initializing or obtaining
@@ -43,15 +44,19 @@ impl GlobalCtx {
     /// This function will also initialize our shadow heap
     fn new(hooks: BsanHooks) -> Self {
         Self {
-            hooks,
+            hooks: hooks.clone(),
             next_alloc_id: AtomicUsize::new(AllocId::min().get()),
             next_thread_id: AtomicUsize::new(0),
-            shadow_heap: ShadowHeap::new(hooks),
+            shadow_heap: ShadowHeap::new(&hooks),
         }
     }
 
     pub fn shadow_heap(&self) -> &ShadowHeap<Provenance> {
         &self.shadow_heap
+    }
+
+    pub fn hooks(&self) -> &BsanHooks {
+        &self.hooks
     }
 
     pub fn new_block<T>(&self, num_elements: NonZeroUsize) -> Block<T> {
