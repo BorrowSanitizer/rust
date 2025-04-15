@@ -292,4 +292,79 @@ mod tests {
         let _ = ShadowHeap::<TestProv>::default();
         teardown();
     }
+
+    #[test]
+    fn test_shadow_heap_performance() {
+        setup();
+        let heap = ShadowHeap::<TestProv>::default();
+        
+        // Create test data
+        const NUM_OPERATIONS: usize = 1000;
+        let test_values: Vec<TestProv> = (0..NUM_OPERATIONS)
+            .map(|i| TestProv { value: (i % 255) as u8 })
+            .collect();
+        
+        // Sequential addresses
+        unsafe {
+            for i in 0..NUM_OPERATIONS {
+                let addr = i * 8; // Word-aligned addresses
+                heap.store_prov(&test_values[i], addr);
+            }
+            
+            for i in 0..NUM_OPERATIONS {
+                let addr = i * 8;
+                let loaded = heap.load_prov(addr);
+                assert_eq!(loaded.value, test_values[i].value);
+            }
+        }
+
+        // Scattered addresses (using different L1/L2 indices)
+        unsafe {
+            for i in 0..NUM_OPERATIONS {
+                let addr = i * 0x1_0000_0000; // Spread across L1 entries
+                heap.store_prov(&test_values[i], addr);
+            }
+            
+            for i in 0..NUM_OPERATIONS {
+                let addr = i * 0x1_0000_0000;
+                let loaded = heap.load_prov(addr);
+                assert_eq!(loaded.value, test_values[i].value);
+            }
+        }
+
+        // Random access pattern
+        let random_addrs: Vec<usize> = (0..NUM_OPERATIONS)
+            .map(|i| i * 0x1234_5678)
+            .collect();
+        
+        unsafe {
+            for i in 0..NUM_OPERATIONS {
+                heap.store_prov(&test_values[i], random_addrs[i]);
+            }
+            
+            for i in 0..NUM_OPERATIONS {
+                let loaded = heap.load_prov(random_addrs[i]);
+                assert_eq!(loaded.value, test_values[i].value);
+            }
+        }
+
+        // Mixed operations (interleaved stores and loads)
+        unsafe {
+            for i in 0..NUM_OPERATIONS {
+                let addr = i * 0x1000;
+                heap.store_prov(&test_values[i], addr);
+                let loaded = heap.load_prov(addr);
+                assert_eq!(loaded.value, test_values[i].value);
+                
+                // Also load from a previous address
+                if i > 0 {
+                    let prev_addr = (i - 1) * 0x1000;
+                    let loaded = heap.load_prov(prev_addr);
+                    assert_eq!(loaded.value, test_values[i - 1].value);
+                }
+            }
+        }
+
+        teardown();
+    }
 }
