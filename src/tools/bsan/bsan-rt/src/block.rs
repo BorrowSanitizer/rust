@@ -17,17 +17,37 @@ pub unsafe trait Linkable<T: Sized> {
 /// An mmap-ed chunk of memory that will munmap the chunk on drop.
 #[derive(Debug)]
 pub struct Block<T: Sized> {
-    pub size: NonZeroUsize,
+    pub num_elements: NonZeroUsize,
     pub base: NonNull<T>,
     pub munmap: MUnmap,
 }
 
 impl<T: Sized> Block<T> {
-    /// The last valid, addressable location within the block (at its high-end)
-    fn last(&self) -> *mut T {
-        unsafe { self.base.as_ptr().add(self.size.get() - 1) }
+    /// The number of instances of T that can fit within the block.
+    #[inline]
+    fn len(&self) -> NonZeroUsize {
+        self.num_elements
     }
+
+    /// The byte width of the block.
+    #[inline]
+    fn byte_width(&self) -> NonZeroUsize {
+        #[cfg(test)]
+        let result = self.len().get().checked_mul(mem::size_of::<T>()).unwrap();
+        #[cfg(not(test))]
+        let result = self.len().get().unchecked_mul(mem::size_of::<T>());
+
+        unsafe { NonZeroUsize::new_unchecked(result) }
+    }
+
+    /// The last valid, addressable location within the block (at its high-end)
+    #[inline]
+    fn last(&self) -> *mut T {
+        unsafe { self.base.as_ptr().add(self.len().get() - 1) }
+    }
+
     /// The first valid, addressable location within the block (at its low-end)
+    #[inline]
     fn first(&self) -> *mut T {
         self.base.as_ptr()
     }
@@ -38,7 +58,8 @@ impl<T> Drop for Block<T> {
         // SAFETY: our munmap pointer will be valid by construction of the GlobalCtx.
         // We can safely transmute it to c_void since that's what it was originally when
         // it was allocated by mmap
-        let success = unsafe { (self.munmap)(mem::transmute(self.base.as_ptr()), self.size.get()) };
+        let success =
+            unsafe { (self.munmap)(mem::transmute(self.base.as_ptr()), self.byte_width().get()) };
         if success != 0 {
             panic!("Failed to unmap block!");
         }

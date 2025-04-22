@@ -70,7 +70,8 @@ impl GlobalCtx {
 
     fn generate_block<T>(mmap: MMap, munmap: MUnmap, num_elements: NonZeroUsize) -> Block<T> {
         let layout = Layout::array::<T>(num_elements.into()).unwrap();
-        let size = NonZeroUsize::new(layout.size()).unwrap();
+        let size: NonZero<usize> = NonZeroUsize::new(layout.size()).unwrap();
+
         let base = unsafe {
             (mmap)(ptr::null_mut(), layout.size(), BSAN_MMAP_PROT, BSAN_MMAP_FLAGS, -1, 0)
         };
@@ -80,7 +81,8 @@ impl GlobalCtx {
         }
         let base = unsafe { NonNull::new_unchecked(mem::transmute(base)) };
         let munmap = munmap;
-        Block { size, base, munmap }
+
+        Block { num_elements, base, munmap }
     }
 
     pub fn new_block<T>(&self, num_elements: NonZeroUsize) -> Block<T> {
