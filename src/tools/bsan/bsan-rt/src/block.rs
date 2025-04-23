@@ -167,9 +167,10 @@ impl<T: Linkable<T>> BlockAllocator<T> {
 
 #[cfg(test)]
 mod test {
-    use test_log::test;
     use std::sync::Arc;
     use std::thread;
+
+    use test_log::test;
 
     use super::*;
     use crate::global::test::TEST_HOOKS;

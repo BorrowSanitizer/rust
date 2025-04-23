@@ -393,17 +393,20 @@ fn panic(info: &PanicInfo<'_>) -> ! {
 
 #[cfg(test)]
 mod test {
-    use test_log::test;
     use core::alloc::{GlobalAlloc, Layout};
     use core::mem::MaybeUninit;
     use core::ptr::NonNull;
+
+    use test_log::test;
 
     use super::*;
     use crate::global::test::TEST_HOOKS;
 
     fn init_bsan_with_test_hooks() {
         let bsan_test_hooks = TEST_HOOKS.clone();
-        unsafe { bsan_init(bsan_test_hooks); }
+        unsafe {
+            bsan_init(bsan_test_hooks);
+        }
     }
 
     fn create_metadata() -> Provenance {
