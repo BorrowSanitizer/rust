@@ -15,7 +15,6 @@ pub unsafe trait Linkable<T: Sized> {
 }
 
 /// An mmap-ed chunk of memory that will munmap the chunk on drop.
-#[derive(Debug)]
 pub struct Block<T: Sized> {
     pub num_elements: NonZeroUsize,
     pub base: NonNull<T>,
@@ -35,7 +34,7 @@ impl<T: Sized> Block<T> {
         #[cfg(test)]
         let result = self.len().get().checked_mul(mem::size_of::<T>()).unwrap();
         #[cfg(not(test))]
-        let result = self.len().get().unchecked_mul(mem::size_of::<T>());
+        let result = unsafe { self.len().get().unchecked_mul(mem::size_of::<T>()) };
 
         unsafe { NonZeroUsize::new_unchecked(result) }
     }
@@ -50,6 +49,17 @@ impl<T: Sized> Block<T> {
     #[inline]
     fn first(&self) -> *mut T {
         self.base.as_ptr()
+    }
+}
+
+impl<T> fmt::Debug for Block<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Block")
+            .field("base", &self.base)
+            .field("first", &self.first())
+            .field("last", &self.last())
+            .field("reserved for num_elements", &self.num_elements)
+            .finish()
     }
 }
 
@@ -157,6 +167,7 @@ impl<T: Linkable<T>> BlockAllocator<T> {
 
 #[cfg(test)]
 mod test {
+    use test_log::test;
     use std::sync::Arc;
     use std::thread;
 

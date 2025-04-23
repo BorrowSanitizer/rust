@@ -72,6 +72,7 @@ impl GlobalCtx {
         let layout = Layout::array::<T>(num_elements.into()).unwrap();
         let size: NonZero<usize> = NonZeroUsize::new(layout.size()).unwrap();
 
+        debug_assert!(mmap as usize != 0);
         let base = unsafe {
             (mmap)(ptr::null_mut(), layout.size(), BSAN_MMAP_PROT, BSAN_MMAP_FLAGS, -1, 0)
         };

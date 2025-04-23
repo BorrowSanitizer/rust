@@ -56,6 +56,11 @@ impl core::fmt::Debug for FreeListAddrUnion {
 pub struct AllocMetadata {
     alloc_id: AllocId,
     base_addr: FreeListAddrUnion,
+    // TODO(obraunsdorf) making tree_address a Box is benefitial internal memory-safety of our bsanrt library
+    // however, a Box with a non-zero-sized allocator takes up more space than just a raw pointer.
+    // We should consider making this a raw pointer or storing malloc/free pointers in a lazily initialized
+    // global variable (maybe using OnceCell/OnceLock),
+    // such that we can make BsanAllocHooks a zero-sized allocator that just uses the global malloc/free.
     tree_address: Box<TreeBorrows::Tree, BsanAllocHooks>,
 }
 
@@ -85,6 +90,7 @@ impl AllocMetadata {
 /// which contains all other metadata used to detect undefined behavior.
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 struct Provenance {
     pub alloc_id: AllocId,
     pub borrow_tag: TreeBorrows::BorrowTag,
@@ -337,6 +343,25 @@ extern "C" fn bsan_alloc_stack(span: Span, prov: *mut MaybeUninit<Provenance>, s
     }
 }
 
+// FIXME(obraunsdorf) using thiserror for good error handling
+// might be valuable in the future to also catch and report Tree Borrows errors
+struct BsanDeallocError {
+    msg: &'static str,
+}
+unsafe fn __inner_bsan_dealloc(span: Span, prov: *mut Provenance) -> Result<(), BsanDeallocError> {
+    let prov = &mut *prov;
+    let ctx = &*global_ctx();
+    let alloc_metadata = &mut *(prov.lock_address as *mut AllocMetadata);
+    if (alloc_metadata.alloc_id.get() != prov.alloc_id.get()) {
+        return Err(BsanDeallocError {
+            //TODO(obraunsdorf) format the id's into the error message for better error reporting
+            msg: "Allocation ID in pointer metadata does not match the one in the lock address",
+        });
+    }
+    alloc_metadata.dealloc(prov.borrow_tag);
+    return Ok(());
+}
+
 /// Deregisters a heap allocation
 /// # Safety
 /// Mutating alloc_metadata (i.e. deallocating the tree, and invalidating alloc_id) through the provencance
@@ -345,17 +370,14 @@ extern "C" fn bsan_alloc_stack(span: Span, prov: *mut MaybeUninit<Provenance>, s
 /// if the
 #[no_mangle]
 unsafe extern "C" fn bsan_dealloc(span: Span, prov: *mut Provenance) {
-    let prov = &mut *prov;
-    let ctx = &*global_ctx();
-    let alloc_metadata = &mut *(prov.lock_address as *mut AllocMetadata);
-    if (alloc_metadata.alloc_id.get() != prov.alloc_id.get()) {
-        panic!(
-            "Allocation ID in pointer metadata ({}) does not match the one in the lock address ({})",
-            prov.alloc_id.get(),
-            alloc_metadata.alloc_id.get()
-        );
+    let result = __inner_bsan_dealloc(span, prov);
+    match result {
+        Ok(_) => {}
+        Err(e) => {
+            //TODO(obraunsdorf) use error handling routing from the hooks to print the error message and exit
+            panic!("BSAN ERROR: {}", e.msg);
+        }
     }
-    alloc_metadata.dealloc(prov.borrow_tag);
 }
 
 /// Marks the borrow tag for `prov` as "exposed," allowing it to be resolved to
@@ -371,6 +393,7 @@ fn panic(info: &PanicInfo<'_>) -> ! {
 
 #[cfg(test)]
 mod test {
+    use test_log::test;
     use core::alloc::{GlobalAlloc, Layout};
     use core::mem::MaybeUninit;
     use core::ptr::NonNull;
@@ -378,49 +401,70 @@ mod test {
     use super::*;
     use crate::global::test::TEST_HOOKS;
 
-    #[test]
-    fn bsan_malloc_alloc_id() {
+    fn init_bsan_with_test_hooks() {
         let bsan_test_hooks = TEST_HOOKS.clone();
+        unsafe { bsan_init(bsan_test_hooks); }
+    }
+
+    fn create_metadata() -> Provenance {
+        let mut prov = MaybeUninit::<Provenance>::uninit();
+        let prov_ptr = (&mut prov) as *mut _;
+        let span1 = 42;
         unsafe {
-            bsan_init(bsan_test_hooks);
-            let mut prov1 = MaybeUninit::<Provenance>::uninit();
-            let span1 = 42;
-            let prov1_ptr = (&mut prov1) as *mut _;
-            bsan_alloc(span1, prov1_ptr, 0xaaaaaaaa as *const c_void, 10);
-            let prov1 = prov1.assume_init();
+            bsan_alloc(span1, prov_ptr, 0xaaaaaaaa as *const c_void, 10);
+            prov.assume_init()
+        }
+    }
+
+    #[test]
+    fn bsan_alloc_increasing_alloc_id() {
+        init_bsan_with_test_hooks();
+        unsafe {
+            log::debug!("before bsan_alloc");
+            let prov1 = create_metadata();
+            log::debug!("directly after bsan_alloc");
             assert_eq!(prov1.alloc_id.get(), 3);
+            assert_eq!(AllocId::min().get(), 3);
             let span2 = 43;
-            let mut prov2 = MaybeUninit::<Provenance>::uninit();
-            let prov2_ptr = (&mut prov2) as *mut _;
-            bsan_alloc(span2, prov2_ptr, 0xaaaaaaaa as *const c_void, 10);
-            let prov2 = prov2.assume_init();
+            let prov2 = create_metadata();
             assert_eq!(prov2.alloc_id.get(), 4);
         }
     }
 
     #[test]
-    fn bsan_malloc_allocmetadata_persistance() {
-        let bsan_test_hooks = TEST_HOOKS.clone();
+    fn bsan_alloc_and_dealloc() {
+        init_bsan_with_test_hooks();
         unsafe {
-            bsan_init(bsan_test_hooks);
-            let mut prov1 = MaybeUninit::<Provenance>::uninit();
-            let prov1_ptr = (&mut prov1) as *mut _;
-            let span1 = 42;
-            bsan_alloc(span1, prov1_ptr, 0xaaaaaaaa as *const c_void, 10);
-            debug!("directly after bsan_malloc");
-            let prov1 = prov1.assume_init();
+            let mut prov = create_metadata();
+            bsan_dealloc(43, &mut prov as *mut _);
+            let alloc_metadata = &*(prov.lock_address as *const AllocMetadata);
+            assert_eq!(alloc_metadata.alloc_id.get(), AllocId::invalid().get());
+            assert_eq!(alloc_metadata.alloc_id.get(), 0);
+        }
+    }
 
-            let prov_alloc_id = prov1.alloc_id;
-            let alloc_metadata = prov1.lock_address as *const AllocMetadata;
-            log::info!(
-                "About to drop provenance. The alloc_metadata behind the lock address should be available afterward: {:?}",
-                *alloc_metadata
-            );
-            drop(prov1);
-            log::info!("Provenance dropped, alloc metadata is: {:?}", *alloc_metadata);
+    #[test]
+    fn bsan_dealloc_detect_double_free() {
+        init_bsan_with_test_hooks();
+        unsafe {
+            let mut prov = create_metadata();
+            let span = 43;
+            let _ = __inner_bsan_dealloc(span, &mut prov as *mut _);
+            let result = __inner_bsan_dealloc(span, &mut prov as *mut _);
+            assert!(result.is_err());
+        }
+    }
 
-            let alloc_metadata = &*alloc_metadata;
-            assert_eq!(alloc_metadata.alloc_id, prov_alloc_id);
+    #[test]
+    fn bsan_dealloc_detect_invalid_free() {
+        init_bsan_with_test_hooks();
+        unsafe {
+            let span = 43;
+            let mut prov = create_metadata();
+            let mut modified_prov = prov;
+            modified_prov.alloc_id = AllocId::new(99);
+            let result = __inner_bsan_dealloc(span, &mut modified_prov as *mut _);
+            assert!(result.is_err());
         }
     }
 }

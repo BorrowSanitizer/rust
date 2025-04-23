@@ -9,6 +9,8 @@ libc = { version = "0.2.169", default-features = false }
 hashbrown = { version = "0.15.2", default-features = false, features = ["default-hasher", "nightly", "inline-more"] }
 rustc-hash = { version = "2.1.1", default-features = false }
 
+[dev-dependencies]
+test-log = "0.2.17"
 
 [lib]
 name = "bsan_rt"
