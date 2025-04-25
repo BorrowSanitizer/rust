@@ -16,8 +16,8 @@ use block::*;
 use hashbrown::{DefaultHashBuilder, HashMap};
 use rustc_hash::FxBuildHasher;
 
-use crate::*;
 use crate::shadow::ShadowHeap;
+use crate::*;
 
 /// Every action that requires a heap allocation must be performed through a globally
 /// accessible, singleton instance of `GlobalCtx`. Initializing or obtaining

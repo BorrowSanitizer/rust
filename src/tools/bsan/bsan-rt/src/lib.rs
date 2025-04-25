@@ -56,12 +56,14 @@ unsafe impl Allocator for BsanAllocHooks {
         unsafe {
             match layout.size() {
                 0 => Ok(NonNull::slice_from_raw_parts(layout.dangling(), 0)),
-                // SAFETY: `layout` is non-zero in size,
-                size => unsafe {
-                    let raw_ptr: *mut u8 = mem::transmute((self.malloc)(layout.size()));
-                    let ptr = NonNull::new(raw_ptr).ok_or(AllocError)?;
+                size => {
+                    let ptr = (self.malloc)(layout.size());
+                    if ptr.is_null() {
+                        return Err(AllocError);
+                    }
+                    let ptr = NonNull::new_unchecked(ptr as *mut u8);
                     Ok(NonNull::slice_from_raw_parts(ptr, size))
-                },
+                }
             }
         }
     }
@@ -164,7 +166,7 @@ impl Default for Provenance {
     fn default() -> Self {
         Provenance::null()
     }
-}   
+}
 
 impl Provenance {
     /// The default provenance value, which is assigned to dangling or invalid
