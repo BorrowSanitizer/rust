@@ -14,7 +14,6 @@ use crate::Provenance;
 /// Most, if not all 64 bit architectures use 48-bits. However, the
 /// Armv8-A spec allows addressing 52 or 56 bits as well. No processors
 /// implement this yet, though, so we can use target_pointer_width.
-
 #[cfg(target_pointer_width = "64")]
 static VA_BITS: u32 = 48;
 

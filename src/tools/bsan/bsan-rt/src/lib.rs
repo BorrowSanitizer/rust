@@ -67,7 +67,8 @@ unsafe impl Allocator for BsanAllocHooks {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, _layout: Layout) {
-        (self.free)(mem::transmute(ptr.as_ptr()))
+        let ptr = mem::transmute::<*mut u8, *mut libc::c_void>(ptr.as_ptr());
+        (self.free)(ptr);
     }
 }
 
