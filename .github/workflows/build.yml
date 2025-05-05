@@ -25,7 +25,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Switch to nightly
-        run: rustup override set nightly
+        run: |
+          rustup default nightly-2024-11-21
+          rustup component add rust-src rustc-dev llvm-tools-preview clippy
       - name: Upstream
         run: src/ci/scripts/setup-upstream-remote.sh
       - name: Format
@@ -33,7 +35,7 @@ jobs:
       - name: Clippy (bsan-rt)
         run: |
           cd src/tools/bsan/bsan-rt
-          cargo clippy --all-targets --all-features -- -D warnings
+          RUSTFLAGS='-C panic=abort -Zpanic_abort_tests' cargo clippy --all-targets --all-features -- -D warnings
       - name: Clippy (bsan-driver)
         run: |
           cd src/tools/bsan/bsan-driver
