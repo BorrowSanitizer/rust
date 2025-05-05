@@ -27,7 +27,7 @@ fn main() {
         // to be instrumented, while "host" indicates that it is a build script or procedural
         // macro, which we can skip.
 
-        if let Some(crate_kind) = env::var("BSAN_BE_RUSTC").ok() {
+        if let Ok(crate_kind) = env::var("BSAN_BE_RUSTC") {
             let is_target = match crate_kind.as_str() {
                 "host" => false,
                 "target" => true,
