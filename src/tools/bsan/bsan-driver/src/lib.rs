@@ -1,5 +1,4 @@
 #![feature(rustc_private)]
-#![warn(clippy::pedantic)]
 
 extern crate rustc_driver;
 
