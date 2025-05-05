@@ -28,6 +28,18 @@ jobs:
         run: src/ci/scripts/setup-upstream-remote.sh
       - name: Format
         run: ./x.py fmt --check
+      - name: Clippy (bsan-rt)
+        run: |
+          cd src/tools/bsan/bsan-rt
+          cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy (bsan-driver)
+        run: |
+          cd src/tools/bsan/bsan-driver
+          cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy (cargo-bsan)
+        run: |
+          cd src/tools/bsan/bsan-driver/cargo-bsan
+          cargo clippy --all-targets --all-features -- -D warnings
   build:
     needs: [fmt]
     strategy:
