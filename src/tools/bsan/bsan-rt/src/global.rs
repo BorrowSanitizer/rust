@@ -65,7 +65,8 @@ impl GlobalCtx {
         if base.is_null() {
             panic!("Allocation failed");
         }
-        let base = unsafe { NonNull::new_unchecked(mem::transmute(base)) };
+        let base = unsafe { mem::transmute::<*mut c_void, *mut T>(base) };
+        let base = unsafe { NonNull::new_unchecked(base) };
         let munmap = self.hooks.munmap;
         Block { size, base, munmap }
     }
@@ -91,12 +92,17 @@ impl GlobalCtx {
     /// to be called directly; instead, it should be used with the `print!`,
     /// `println!`, and `ui_test!` macros.
     pub fn print(&self, args: fmt::Arguments<'_>) {
-        let mut w = BVec::new(self);
-        let _ = write!(&mut w, "{}", args);
+        let mut buffer = BVec::new(self);
+        let _ = write!(&mut buffer, "{}", args);
         unsafe {
-            (self.hooks.print)(mem::transmute(w.as_ptr()));
+            let buffer = mem::transmute::<*const u8, *const i8>(buffer.as_ptr());
+            (self.hooks.print)(buffer);
         }
     }
+}
+
+impl Drop for GlobalCtx {
+    fn drop(&mut self) {}
 }
 
 /// Prints to stdout.
@@ -253,6 +259,9 @@ pub static GLOBAL_CTX: SyncUnsafeCell<MaybeUninit<GlobalCtx>> =
     SyncUnsafeCell::new(MaybeUninit::uninit());
 
 /// Initializes the global context object.
+///
+/// # Safety
+///
 /// This function must only be called once: when the program is first initialized.
 /// It is marked as `unsafe`, because it relies on the set of function pointers in
 /// `BsanHooks` to be valid.
@@ -263,6 +272,7 @@ pub unsafe fn init_global_ctx(hooks: BsanHooks) -> *mut GlobalCtx {
 }
 
 /// Deinitializes the global context object.
+/// # Safety
 /// This function must only be called once: when the program is terminating.
 /// It is marked as `unsafe`, since all other API functions except for `bsan_init` rely
 /// on the assumption that this function has not been called yet.
@@ -271,9 +281,9 @@ pub unsafe fn deinit_global_ctx() {
     drop(ptr::replace(GLOBAL_CTX.get(), MaybeUninit::uninit()).assume_init());
 }
 
-/// Accessing the global context is unsafe since the user needs to ensure that
-/// the context is initialized, e.g. `bsan_init` has been called and `bsan_deinit`
-/// has not yet been called.
+/// # Safety
+/// The user needs to ensure that the context is initialized, e.g. `bsan_init`
+/// has been called and `bsan_deinit` has not yet been called.
 #[inline]
 pub unsafe fn global_ctx() -> *mut GlobalCtx {
     let ctx: *mut MaybeUninit<GlobalCtx> = GLOBAL_CTX.get();

@@ -102,7 +102,7 @@ pub fn exec_stdout(mut cmd: Command) -> String {
     if output.status.success() {
         String::from_utf8(output.stdout).expect("output bytes should be valid utf8")
     } else {
-        panic!("failed to run command: {:?}", output)
+        panic!("failed to run command: {output:?}")
     }
 }
 

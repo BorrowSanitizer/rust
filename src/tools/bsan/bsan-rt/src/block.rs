@@ -8,8 +8,11 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use crate::*;
 
 /// Types that implement this trait can act as elements
-/// of a singly-linked list. For this implementation to be sound,
-/// the pointer that is returned must not be mutated concurrently.
+/// of a singly-linked list.
+///
+/// # Safety
+///
+/// The pointer that is returned by `next` must not be mutated concurrently.
 pub unsafe trait Linkable<T: Sized> {
     fn next(&self) -> *mut *mut T;
 }
@@ -38,7 +41,10 @@ impl<T> Drop for Block<T> {
         // SAFETY: our munmap pointer will be valid by construction of the GlobalCtx.
         // We can safely transmute it to c_void since that's what it was originally when
         // it was allocated by mmap
-        let success = unsafe { (self.munmap)(mem::transmute(self.base.as_ptr()), self.size.get()) };
+        let success = unsafe {
+            let ptr = mem::transmute::<*mut T, *mut libc::c_void>(self.base.as_ptr());
+            (self.munmap)(ptr, self.size.get())
+        };
         if success != 0 {
             panic!("Failed to unmap block!");
         }

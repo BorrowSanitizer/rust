@@ -26,7 +26,7 @@ pub fn run_compiler(
             BSAN_DEFAULT_ARGS.iter().map(ToString::to_string).collect::<Vec<_>>();
         if let Some(runtime) = env::var_os("BSAN_RT_SYSROOT") {
             let rt = runtime.to_string_lossy();
-            additional_args.push(format!("-L{}/lib", rt));
+            additional_args.push(format!("-L{rt}/lib"));
         }
         args.splice(1..1, additional_args);
     }
