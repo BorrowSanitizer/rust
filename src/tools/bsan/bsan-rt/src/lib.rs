@@ -277,7 +277,7 @@ extern "C" fn bsan_pop_frame(span: Span) {}
 
 // Registers a heap allocation of size `size`
 #[no_mangle]
-extern "C" fn bsan_alloc(span: Span, prov: *mut MaybeUninit<Provenance>, addr: usize) {
+extern "C" fn bsan_alloc(span: Span, prov: *mut MaybeUninit<Provenance>, addr: usize, size: usize) {
     unsafe {
         (*prov).write(Provenance::null());
     }
