@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
       - name: Switch to nightly
         run: |
-          rustup default nightly-2024-11-21
+          rustup default $BSAN_TOOLCHAIN
           rustup component add rust-src rustc-dev llvm-tools-preview clippy
       - name: Upstream
         run: src/ci/scripts/setup-upstream-remote.sh
@@ -100,3 +100,4 @@ jobs:
         run: ./x.py test --stage 1 src/tools/bsan/bsan-rt
       - name: UI Tests
         run: ./x.py test --stage 2 src/tools/bsan/bsan-driver
+      
