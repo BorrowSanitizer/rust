@@ -67,7 +67,7 @@ jobs:
           tar -xzvf llvm.tar.gz
       - name: Build LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
-        run: ./x.py build llvm
+        run: ./x.py build llvm --stage 1
       - name: Compress LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: tar -czvf llvm.tar.gz build/${{ matrix.config.target }}/llvm        
