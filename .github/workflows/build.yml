@@ -34,14 +34,12 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - arch: x86 Linux
+          - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - arch: ARM64 macOS
+          - target: aarch64-apple-darwin
             os: macos-latest
-          #  - arch: ARM64 Linux
-          #    os: ubuntu-24.04-arm
     runs-on: '${{ matrix.config.os }}'
-    name: 'Build (${{ matrix.config.arch }})'
+    name: '${{ matrix.config.target }}'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,10 +50,37 @@ jobs:
           cp src/bootstrap/defaults/config.bsan.dev.toml config.toml
       - name: Upstream
         run: src/ci/scripts/setup-upstream-remote.sh
+      - name: Configure LLVM
+        run: |
+          export LLVM_COMMIT=$(git ls-tree --object-only --abbrev=7 HEAD src/llvm-project)
+          echo "LLVM_COMMIT=$LLVM_COMMIT" >> $GITHUB_ENV
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: llvm.tar.gz
+          key: ${{ matrix.config.target }}-${{ matrix.config.os }}-${{ env.LLVM_COMMIT }}
+      - name: Decompress LLVM
+        if: steps.cache-llvm.outputs.cache-hit == 'true'
+        run: |
+          mkdir -p build/host/llvm
+          tar -xzvf llvm.tar.gz
+      - name: Build LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: ./x.py build llvm
+      - name: Compress LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: tar -czvf llvm.tar.gz build/${{ matrix.config.target }}/llvm        
+      - name: Save LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        id: cache-llvm-save
+        uses: actions/cache/save@v4
+        with:
+          path: llvm.tar.gz
+          key: ${{ matrix.config.target }}-${{ matrix.config.os }}-${{ env.LLVM_COMMIT }}
       - name: Build
         run: ./x.py build --stage 1
       - name: Unit Tests
         run: ./x.py test --stage 1 src/tools/bsan/bsan-rt
       - name: UI Tests
         run: ./x.py test --stage 2 src/tools/bsan/bsan-driver
-      
