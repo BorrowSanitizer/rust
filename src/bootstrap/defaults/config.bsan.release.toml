@@ -1,11 +1,11 @@
 [build]
 build-stage = 2
-test-stage = 2
-doc-stage = 2
 extended = true
+docs = false
 
 [llvm]
 download-ci-llvm = false
+targets = "AArch64;ARM;X86"
 
 [rust]
 channel = "dev"

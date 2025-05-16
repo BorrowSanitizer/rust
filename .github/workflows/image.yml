@@ -1,0 +1,192 @@
+name: image
+on:
+  workflow_dispatch: 
+  release:
+    types: [published]
+    
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: "image"
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_IMAGE: ghcr.io/borrowsanitizer/rust
+  COMPRESSION: .tar.xz
+  
+jobs:
+    release-info:
+        # Every time we publish a new release, we want to build a corresponding
+        # Docker image. However, we also want to be able to manually trigger this workflow
+        # for debugging purposes. For this reason, instead of relying on the properties of `github.event`,
+        # we query the GitHub API manually.
+        name: Gather release info
+        outputs:
+            repo: ${{ steps.release-info.outputs.repo }}
+            sha: ${{ steps.release-info.outputs.sha }}
+            tag: ${{ steps.release-info.outputs.tag }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: Gather release info
+              id: release-info
+              env:
+                GH_TOKEN: ${{ github.token }}
+              run: |
+                RELEASE_TAG=$(gh api repos/${{ github.repository }}/releases --jq 'sort_by(.created_at) | reverse | .[0].tag_name')
+                RELEASE_SHA=$(gh api repos/${{ github.repository }}/git/refs/tags/$RELEASE_TAG --jq '.object.sha')
+                echo "repo=${GITHUB_REPOSITORY@L}" >> $GITHUB_OUTPUT
+                sha=$(echo "$RELEASE_SHA" | cut -c1-7)
+                echo "tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+                echo "sha=$sha" >> $GITHUB_OUTPUT
+
+    # Builds a series of Docker images; one for each supported architecture
+    # Each image has a corresponding "digest" that's saved as an artifact.
+    # Each digest is combined into a single, multi-architecture image in the final stage.
+    build:
+      needs: release-info
+      runs-on: ubuntu-latest
+      strategy:
+        fail-fast: false
+        matrix:
+          config:
+            - platform: linux/amd64
+              target: x86_64-unknown-linux-gnu
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+        - name: Prepare
+          run: |
+            platform=${{ matrix.config.platform }}
+            echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+        - name: Docker meta
+          id: meta
+          uses: docker/metadata-action@v5
+          with:
+            images: ${{ env.REGISTRY_IMAGE }}
+          
+        # Our releases artifacts will always be a series of compressed archives
+        # with names matching each supported target. For example, when we're building
+        # an image for `x86_64-unknown-linux-gnu`, we want `x86_64-unknown-linux-gnu.tar.xz`.
+        - name: Resolve URLs
+          id: resolve_urls
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            QUERY=".assets[] | select(.url | endswith(\"${{matrix.config.target}}${{ env.COMPRESSION }}\")) | \"\(.url)\""
+            url=$(gh release view ${{ needs.release-info.outputs.tag }} --repo ${{ github.repository }} --json assets -q "$QUERY") 
+            if [ ! "$url" ]; then
+              echo "Unable to resolve url for release asset."
+              exit 1
+            fi
+            echo "url_basename=$(basename $url ${{ env.COMPRESSION }})" >> "$GITHUB_OUTPUT"
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            
+        - name: Login
+          uses: docker/login-action@v3
+          with:
+            registry: ${{ env.REGISTRY }}
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
+
+        - name: Set up QEMU
+          uses: docker/setup-qemu-action@v3
+
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
+
+        - name: Build and push by digest
+          id: build
+          uses: docker/build-push-action@v6
+          with:
+            context: .
+            file: ./src/ci/bsan/Dockerfile.bsan
+            platforms: ${{ matrix.config.platform }}
+            labels: ${{ steps.meta.outputs.labels }}
+            tags: ${{ env.REGISTRY_IMAGE }}
+            outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+            # URL     - The URL of the compressed toolchain, which is downloaded, extracted, and installed when building the image.
+            # TARGET  - The current target; e.g. `aarch64-apple-darwin`.
+            # PREFIX  - A string placed before the name of the target for the toolchain installed within the container.
+            #           For example, "$PREFIX-$TARGET" will be listed as the only toolchain installed.
+            build-args: |
+              URL=${{ steps.resolve_urls.outputs.url }}
+              TARGET=${{ matrix.config.target }}
+              PREFIX=bsan-${{ needs.release-info.outputs.tag }}-${{needs.release-info.outputs.sha}}
+
+        - name: Export digest
+          run: |
+            mkdir -p ${{ runner.temp }}/digests
+            digest="${{ steps.build.outputs.digest }}"
+            touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+        - name: Upload digest
+          uses: actions/upload-artifact@v4
+          with:
+            name: digests-${{ env.PLATFORM_PAIR }}
+            path: ${{ runner.temp }}/digests/*
+            if-no-files-found: error
+            retention-days: 1
+
+    merge:
+      runs-on: ubuntu-latest
+      needs: [release-info, build]
+      steps:
+        - name: Download digests
+          uses: actions/download-artifact@v4
+          with:
+            path: ${{ runner.temp }}/digests
+            pattern: digests-*
+            merge-multiple: true
+
+        - name: Login
+          uses: docker/login-action@v3
+          with:
+            registry: ${{ env.REGISTRY }}
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
+
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
+
+        - name: Docker meta
+          id: meta
+          uses: docker/metadata-action@v5
+          with:
+            images: ${{ env.REGISTRY_IMAGE }}
+            tags: |
+              type=raw,value=${{ needs.release-info.outputs.tag }}
+        - name: Create manifest list and push
+          working-directory: ${{ runner.temp }}/digests
+          run: |
+            docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+              $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+        - name: Inspect image
+          run: |
+            docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+
+    cleanup:
+      runs-on: ubuntu-latest
+      needs: [merge]
+      steps:
+        - name: Delete untagged images
+          env:
+              GH_TOKEN: ${{ github.token }}
+          run: |
+            ENDPOINT=/orgs/${{ github.repository_owner }}/packages/container/rust/versions
+            gh api "$ENDPOINT" --paginate \
+              -q '.[] | select(.metadata.container.tags | length == 0) | .id' |
+            while read -r id; do
+              gh api -X DELETE "$ENDPOINT/$id" 
+            done
+            
