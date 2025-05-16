@@ -1,7 +1,7 @@
 name: release
 on:
   schedule:
-     - cron: "0 0 * * 1"
+     - cron: "5 0 * * *"
   workflow_dispatch:
 permissions:
   contents: write
@@ -11,29 +11,45 @@ defaults:
 concurrency:
   group: "release"
   cancel-in-progress: true
+env:
+  prefix: bsan
+  
 jobs:
   init:
     runs-on: ubuntu-latest
     name: Init
     outputs:
         should_run: ${{ steps.should_run.outputs.should_run }}
+        rustc_sha: ${{ steps.info.outputs.RUSTC_SHA }}
+        rustc_version: ${{ steps.info.outputs.RUSTC_VERSION }}
+        release_name: ${{ steps.info.outputs.RELEASE_NAME }}
+        
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: BorrowSanitizer/rust
           fetch-depth: 0
+          
       - name: Set version info
+        id: info
         run: |
+            export RUSTC_VERSION=$(cat src/version)
             export DATE=$(git log -1 --format=%cd --date=format:%Y-%m-%d)
-            export TAG_NAME=$(echo ${{ github.sha }} | cut -c1-7)
-            export RELEASE_NAME="$DATE-$TAG_NAME"
+            export RUSTC_SHA=$(git rev-parse HEAD)
+            export RELEASE_NAME="$DATE-$(echo $RUSTC_SHA | cut -c1-7)"
+            echo "RELEASE_NAME=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+            echo "RUSTC_VERSION=$RUSTC_VERSION" >> "$GITHUB_OUTPUT"
+            echo "RUSTC_SHA=$RUSTC_SHA" >> "$GITHUB_OUTPUT"
+            echo "$RUSTC_VERSION"
+            echo "$RUSTC_SHA"
             echo "$RELEASE_NAME"
-            echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-            echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_ENV
-      - id: should_run
+
+      - name: Check if updates have been published
+        id: should_run
         continue-on-error: true
-        name: Check if updates have been published
         if: ${{ github.event_name == 'schedule' }}
         run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
+
   build:
     needs: [init]
     strategy:
@@ -42,41 +58,112 @@ jobs:
         config:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            free_disk: true
           - os: macos-latest
             target: aarch64-apple-darwin
+            free_disk: false
     runs-on: '${{ matrix.config.os }}'
     name: 'Build (${{ matrix.config.target }})'
     steps:
+
       - uses: actions/checkout@v4
         with:
+          repository: BorrowSanitizer/rust
           fetch-depth: 0
-      - name: Install dependencies
+      
+      - name: Configure
+        id: config
+        continue-on-error: true
         run: |
-          rustup component add llvm-tools-preview
-          cp src/bootstrap/defaults/config.bsan.dev.toml config.toml
-      - name: Upstream
-        run: src/ci/scripts/setup-upstream-remote.sh
+          git config --global --add safe.directory $GITHUB_WORKSPACE
+          src/ci/scripts/setup-upstream-remote.sh 
+          echo "artifact=${{ env.prefix }}-${{ needs.init.outputs.release_name }}-${{ matrix.config.target }}" >> $GITHUB_OUTPUT
+          
+      - name: Install dependencies
+        run: rustup component add llvm-tools-preview
+
+      - name: Free up disk space
+        run: src/ci/scripts/free-disk-space.sh
+        if: matrix.config.free_disk
+
       - name: Dist
-        run: ./x.py dist --config src/bootstrap/defaults/config.dist.toml
+        run: ./x.py dist --config src/bootstrap/defaults/config.bsan.release.toml
+        
+      - name: Rename to target
+        run: |
+          mv ./build/dist/rust-${{ needs.init.outputs.rustc_version }}-dev-${{ matrix.config.target }}.tar.xz \
+            ./${{ steps.config.outputs.artifact }}.tar.xz 
+
       - name: Publish
         uses: actions/upload-artifact@v4
         with:
-          name: bsan-${{ matrix.config.os }}-${{ matrix.config.arch }}
-          path: build/dist/rust-nightly-${{ matrix.config.target }}.tar.xz
+          compression-level: 0
+          name: ${{ steps.config.outputs.artifact }}
+          path: ./${{ steps.config.outputs.artifact }}.tar.xz
+          
   release:
     name: Update rolling release
     needs: [init, build]
     runs-on: macos-latest
     steps:
-      - name: Download artifact
+      - name: Download all artifacts
+        id: artifact_download
         uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: artifacts
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: rolling
-          prerelease: true
-          files: |
-            artifacts/*.tar.xz
+
+      - name: Unzip doubly-compressed artifacts
+        run: |
+          find . -name "*.zip" -exec unzip -o -d . {} \; 
+          find . -name "*.tar.xz"
+
+      - name: Delete current rolling release tag
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "/repos/BorrowSanitizer/rust/git/refs/tags/rolling"
+
+      - name: Prepare draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            -X PATCH \
+            /repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }} \
+            -f "tag_name=rolling" \
+            -f "target_commitish=${{ needs.init.outputs.rustc_sha }}" \
+            -f "name=Rolling Release ${{ needs.init.outputs.release_name }}" \
+            -f "body=Rolling release from continuous integration." \
+            -F "draft=true" \
+            -F "prerelease=true"
+
+      - name: Delete all existing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for ASSET in $(gh api /repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }}/assets -q '.[].id'); do
+            echo "Deleting asset $ASSET"
+            gh api -X DELETE "/repos/BorrowSanitizer/rust/releases/assets/$ASSET"
+          done
+
+      - name: Upload distribution files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload \
+            rolling \
+            $(find . -name "*.tar.xz") \
+            --repo BorrowSanitizer/rust
+       
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            -X PATCH \
+            "/repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }}" \
+            -F "draft=false"
+
+      - name: Trigger image workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run image

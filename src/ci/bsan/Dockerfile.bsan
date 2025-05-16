@@ -1,0 +1,27 @@
+FROM ubuntu:latest
+WORKDIR /usr/bsan
+ARG URL
+ARG VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt update \
+    && apt upgrade -y \
+    && apt install curl xz-utils -y
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh\
+    && chmod +x rustup.sh \
+    && ./rustup.sh -y --default-toolchain none \
+    && rm rustup.sh
+
+ENV PATH="$PATH:/root/.cargo/bin"
+
+ENV BSAN_VERSION=${VERSION}
+
+RUN TOOLCHAIN_DEST_DIR="/root/.rustup/toolchains/$BSAN_VERSION" \
+    && mkdir -p "$TOOLCHAIN_DEST_DIR" \
+    && curl -L -o rust.tar.xz "${URL}" \
+    && mkdir rust \
+    && tar -xf rust.tar.xz -C rust --strip-components=1 \
+    && rm rust.tar.xz \
+    && ./rust/install.sh --verbose --prefix="" --destdir="$TOOLCHAIN_DEST_DIR" \
+    && rm -rf rust
