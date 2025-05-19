@@ -277,7 +277,7 @@ pub static GLOBAL_CTX: SyncUnsafeCell<MaybeUninit<GlobalCtx>> =
 /// It is marked as `unsafe`, because it relies on the set of function pointers in
 /// `BsanHooks` to be valid.
 #[inline]
-pub unsafe fn init_global_ctx(hooks: BsanHooks) -> *mut GlobalCtx {
+pub unsafe fn init_global_ctx<'a>(hooks: BsanHooks) -> &'a GlobalCtx {
     (*GLOBAL_CTX.get()).write(GlobalCtx::new(hooks));
     global_ctx()
 }
@@ -296,9 +296,9 @@ pub unsafe fn deinit_global_ctx() {
 /// The user needs to ensure that the context is initialized, e.g. `bsan_init`
 /// has been called and `bsan_deinit` has not yet been called.
 #[inline]
-pub unsafe fn global_ctx() -> *mut GlobalCtx {
-    let ctx: *mut MaybeUninit<GlobalCtx> = GLOBAL_CTX.get();
-    mem::transmute(ctx)
+pub unsafe fn global_ctx<'a>() -> &'a GlobalCtx {
+    let ctx = GLOBAL_CTX.get();
+    &*mem::transmute::<*mut MaybeUninit<GlobalCtx>, *mut GlobalCtx>(ctx)
 }
 
 #[cfg(test)]

@@ -223,7 +223,7 @@ impl AllocInfo {
 #[no_mangle]
 unsafe extern "C" fn bsan_init(hooks: BsanHooks) {
     let ctx = init_global_ctx(hooks);
-    let ctx = unsafe { &*ctx };
+    let ctx = unsafe { ctx };
     init_local_ctx(ctx);
     ui_test!(ctx, "bsan_init");
 }
@@ -233,7 +233,7 @@ unsafe extern "C" fn bsan_init(hooks: BsanHooks) {
 /// will be called after this function has executed.
 #[no_mangle]
 unsafe extern "C" fn bsan_deinit() {
-    let global_ctx = unsafe { &*global_ctx() };
+    let global_ctx = unsafe { global_ctx() };
     ui_test!(global_ctx, "bsan_deinit");
     deinit_local_ctx();
     deinit_global_ctx();
@@ -266,17 +266,26 @@ extern "C" fn bsan_shadow_clear(addr: usize, access_size: usize) {}
 /// Loads the provenance of a given address from shadow memory and stores
 /// the result in the return pointer.
 #[no_mangle]
-unsafe extern "C" fn bsan_load_prov(prov: *mut Provenance, address: usize) {
-    let result = (*global_ctx()).shadow_heap().load_prov(address);
-    *prov = result;
+unsafe extern "C" fn bsan_load_prov(prov: *mut Provenance, addr: usize) {
+    debug_assert!(!prov.is_null());
+
+    let ctx = global_ctx();
+    let heap = ctx.shadow_heap();
+
+    *prov = heap.load_prov(addr);
 }
 
 /// Stores the given provenance value into shadow memory at the location for the given address.
 #[no_mangle]
-unsafe extern "C" fn bsan_store_prov(provenance: *const Provenance, address: usize) {
-    let heap = (*global_ctx()).shadow_heap();
-    heap.store_prov(provenance, address);
+unsafe extern "C" fn bsan_store_prov(prov: *const Provenance, addr: usize) {
+    debug_assert!(!prov.is_null());
+
+    let ctx = global_ctx();
+    let heap = ctx.shadow_heap();
+
+    heap.store_prov(ctx.hooks(), prov, addr);
 }
+
 /// Pushes a shadow stack frame
 #[no_mangle]
 extern "C" fn bsan_push_frame(span: Span) {}

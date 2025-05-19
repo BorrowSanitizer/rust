@@ -161,7 +161,7 @@ mod test {
     #[test]
     fn allocate_from_page_in_parallel() {
         let ctx = unsafe { init_global_ctx(TEST_HOOKS.clone()) };
-        let ctx = unsafe { &*ctx };
+        let ctx = unsafe { ctx };
         let block = ctx.new_block::<Link>(unsafe { NonZero::new_unchecked(200) });
         let page = Arc::new(BlockAllocator::<Link>::new(block));
         let mut threads = Vec::new();

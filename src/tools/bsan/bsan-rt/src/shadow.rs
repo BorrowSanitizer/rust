@@ -10,6 +10,7 @@ use libc::{MAP_ANONYMOUS, MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
 
 use crate::global::{GlobalCtx, global_ctx};
 use crate::{BsanAllocHooks, BsanHooks, MUnmap, println};
+
 /// Different targets have a different number
 /// of significant bits in their pointer representation.
 /// On 32-bit platforms, all 32-bits are addressable. Most
@@ -28,10 +29,10 @@ static VA_BITS: u32 = 32;
 static VA_BITS: u32 = 16;
 
 // The number of bytes in a pointer
-static PTR_BYTES: usize = mem::size_of::<usize>();
+static PTR_BYTES: u32 = mem::size_of::<usize>().ilog2();
 
 // The number of addressable, word-aligned, pointer-sized chunks
-static NUM_ADDR_CHUNKS: u32 = VA_BITS - (PTR_BYTES.ilog2());
+static NUM_ADDR_CHUNKS: u32 = VA_BITS - PTR_BYTES;
 
 // We have 2^L2_POWER entries in the second level of the page table
 // Adding 1 ensures that we have more second-level entries than first
@@ -57,12 +58,23 @@ static MAP_SHADOW: i32 = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
 /// levels of the shadow page table.
 #[inline(always)]
 pub fn table_indices(address: usize) -> (usize, usize) {
-    #[cfg(target_endian = "little")]
-    let l1_index = address.shr(L2_POWER).bitand((L1_POWER - 1) as usize);
-    #[cfg(target_endian = "big")]
-    let l1_index = address.shl(L2_POWER).bitand((L1_POWER - 1) as usize);
+    let as_num_ptrs = address.shr(PTR_BYTES);
 
-    let l2_index = address.bitand((L2_POWER - 1) as usize);
+    #[cfg(target_endian = "little")]
+    let l1_index = address.shr(L2_POWER);
+    #[cfg(target_endian = "big")]
+    let l1_index = address.shl(L2_POWER);
+
+    let l1_index = l1_index.bitand(2_usize.pow(L1_POWER) - 1);
+
+    let l2_mask = 2_usize.pow(L2_POWER) - 1;
+
+    #[cfg(target_endian = "little")]
+    let l2_index = address.bitand(l2_mask);
+
+    #[cfg(target_endian = "big")]
+    let l2_index = address.bitand(l2_mask);
+
     (l1_index, l2_index)
 }
 
@@ -70,32 +82,29 @@ pub fn table_indices(address: usize) -> (usize, usize) {
 #[derive(Debug)]
 pub struct ShadowHeap<T> {
     // First level table containing pointers to second level tables
-    l1_entries: *mut [*mut [T; L2_LEN]; L1_LEN],
-    hooks: BsanHooks,
+    table: *mut [*mut [T; L2_LEN]; L1_LEN],
+    munmap: MUnmap,
 }
 
 unsafe impl<T> Sync for ShadowHeap<T> {}
 
-impl<T> Default for ShadowHeap<T> {
-    fn default() -> Self {
-        unsafe { Self::new(&(*global_ctx()).hooks()) }
-    }
-}
-
 impl<T> ShadowHeap<T> {
     pub fn new(hooks: &BsanHooks) -> Self {
         unsafe {
-            let l1_void =
-                (hooks.mmap)(ptr::null_mut(), PTR_BYTES * L1_LEN, PROT_SHADOW, MAP_SHADOW, -1, 0);
-            assert!(!l1_void.is_null() && l1_void != (-1isize as *mut c_void));
-            ptr::write_bytes(l1_void as *mut u8, 0, PTR_BYTES * L1_LEN);
+            let size_of_l1 = mem::size_of::<[*mut [T; L2_LEN]; L1_LEN]>();
 
-            Self { l1_entries: mem::transmute(l1_void), hooks: hooks.clone() }
+            let table = (hooks.mmap)(ptr::null_mut(), size_of_l1, PROT_SHADOW, MAP_SHADOW, -1, 0);
+
+            assert!(!table.is_null() && table != (-1isize as *mut c_void));
+
+            let table = mem::transmute::<*mut c_void, *mut [*mut [T; L2_LEN]; L1_LEN]>(table);
+
+            Self { table, munmap: hooks.munmap }
         }
     }
 
-    unsafe fn allocate_l2_table(&self) -> *mut [T; L2_LEN] {
-        let l2_void = (self.hooks.mmap)(
+    unsafe fn allocate_l2_table(&self, hooks: &BsanHooks) -> *mut [T; L2_LEN] {
+        let l2_void = (hooks.mmap)(
             ptr::null_mut(),
             mem::size_of::<T>() * L2_LEN,
             PROT_SHADOW,
@@ -110,54 +119,29 @@ impl<T> ShadowHeap<T> {
 }
 
 impl<T: Default + Copy> ShadowHeap<T> {
-    pub unsafe fn load_prov(&self, address: usize) -> T {
-        let ctx: &GlobalCtx = &*global_ctx();
-        let (l1_index, l2_index) = table_indices(address);
-        println!(
-            ctx,
-            "load_prov: address={:#x}, l1_index={:#x}, l2_index={:#x}", address, l1_index, l2_index
-        );
+    pub unsafe fn load_prov(&self, addr: usize) -> T {
+        let (l1_index, l2_index) = table_indices(addr);
 
-        let l2_table = (*self.l1_entries)[l1_index];
-        println!(ctx, "load_prov: l2_table={:?}", l2_table);
+        let l2_table: *mut [T; L2_LEN] = (*self.table)[l1_index];
 
         if l2_table.is_null() {
-            println!(ctx, "load_prov: L2 table is null, returning default");
             return T::default();
         }
 
-        println!(ctx, "load_prov: loading value from l2_index={:#x}", l2_index);
         (*l2_table)[l2_index]
     }
 
-    pub unsafe fn store_prov(&self, provenance: *const T, address: usize) {
-        let ctx: &GlobalCtx = &*global_ctx();
-        if provenance.is_null() {
-            println!(ctx, "store_prov: null provenance");
-            return;
+    pub unsafe fn store_prov(&self, hooks: &BsanHooks, prov: *const T, addr: usize) {
+        let (l1_index, l2_index) = table_indices(addr);
+
+        let l2_table_ptr: *mut *mut [T; L2_LEN] = &raw mut (*self.table)[l1_index];
+
+        if (*l2_table_ptr).is_null() {
+            *l2_table_ptr = self.allocate_l2_table(hooks);
         }
 
-        let (l1_index, l2_index) = table_indices(address);
-        println!(
-            ctx,
-            "store_prov: address={:#x}, l1_index={:#x}, l2_index={:#x}",
-            address,
-            l1_index,
-            l2_index
-        );
-
-        let l2_table_ptr = &mut (*self.l1_entries)[l1_index];
-        println!(ctx, "store_prov: l2_table_ptr={:?}", l2_table_ptr);
-
-        if l2_table_ptr.is_null() {
-            println!(ctx, "store_prov: allocating new L2 table");
-            let new_table = self.allocate_l2_table();
-            *l2_table_ptr = new_table;
-            println!(ctx, "store_prov: new L2 table allocated at {:?}", *l2_table_ptr);
-        }
-
-        println!(ctx, "store_prov: storing value at l2_index={:#x}", l2_index);
-        (*l2_table_ptr)[l2_index] = *provenance;
+        let slot: *mut T = &raw mut ((**l2_table_ptr)[l2_index]);
+        *slot = *prov;
     }
 }
 
@@ -166,14 +150,15 @@ impl<T> Drop for ShadowHeap<T> {
         unsafe {
             // Free all L2 tables
             for i in 0..L1_LEN {
-                let l2_table = (*self.l1_entries)[i];
+                let l2_table = (*self.table)[i];
                 if !l2_table.is_null() {
-                    (self.hooks.munmap)(l2_table as *mut c_void, mem::size_of::<T>() * L2_LEN);
+                    (self.munmap)(l2_table as *mut c_void, mem::size_of::<T>() * L2_LEN);
                 }
             }
+            let size_of_l1 = mem::size_of::<[*mut [T; L2_LEN]; L1_LEN]>();
 
             // Free L1 table
-            (self.hooks.munmap)(self.l1_entries as *mut c_void, PTR_BYTES * L1_LEN);
+            (self.munmap)(self.table as *mut c_void, size_of_l1);
         }
     }
 }
@@ -218,114 +203,70 @@ mod tests {
         libc::munmap(ptr, size)
     }
 
-    #[derive(Debug, Copy, Clone)]
+    #[derive(Default, Debug, Copy, Clone)]
     struct TestProv {
-        value: u8,
-    }
-
-    impl Default for TestProv {
-        fn default() -> Self {
-            Self { value: 0 }
-        }
-    }
-
-    fn setup() {
-        unsafe {
-            init_global_ctx(TEST_HOOKS);
-        }
-    }
-
-    fn teardown() {
-        unsafe {
-            deinit_global_ctx();
-        }
+        value: u128,
     }
 
     #[test]
     fn test_table_indices() {
-        setup();
         let addr = 0x1234_5678_1234_5678;
         let (l1, l2) = table_indices(addr);
         assert!(l1 < L1_LEN);
         assert!(l2 < L2_LEN);
-        teardown();
     }
 
     #[test]
     fn test_shadow_heap_creation() {
-        setup();
-        let _heap = ShadowHeap::<TestProv>::default();
-        teardown();
+        ShadowHeap::<TestProv>::new(&TEST_HOOKS);
     }
 
     #[test]
     fn test_load_null_prov() {
-        setup();
-        let heap = ShadowHeap::<TestProv>::default();
+        let heap = ShadowHeap::<TestProv>::new(&TEST_HOOKS);
         let prov = unsafe { heap.load_prov(0) };
         assert_eq!(prov.value, 0);
-        teardown();
     }
 
     #[test]
     fn test_store_and_load_prov() {
-        setup();
-        let heap = ShadowHeap::<TestProv>::default();
+        let heap = ShadowHeap::<TestProv>::new(&TEST_HOOKS);
         let test_prov = TestProv { value: 42 };
         // Use an address that will split into non-zero indices for both L1 and L2
         let addr = 0x1234_5678_1234_5678;
-
         unsafe {
-            // heap.store_prov(&test_prov, addr);
+            heap.store_prov(&TEST_HOOKS, &test_prov, addr);
             let loaded_prov = heap.load_prov(addr);
-            // assert_eq!(loaded_prov.value, test_prov.value);
+            assert_eq!(loaded_prov.value, test_prov.value);
         }
-        teardown();
     }
 
     #[test]
-    fn create_and_drop() {
-        setup();
-        let _ = ShadowHeap::<TestProv>::default();
-        teardown();
-    }
-
-    #[test]
-    fn test_shadow_heap_performance() {
-        setup();
-        let heap = ShadowHeap::<TestProv>::default();
-        let ctx: &GlobalCtx = unsafe { &*global_ctx() };
+    fn smoke() {
+        let heap = ShadowHeap::<TestProv>::new(&TEST_HOOKS);
 
         // Create test data
-        const NUM_OPERATIONS: usize = 100;
+        const NUM_OPERATIONS: usize = 10000;
         let test_values: Vec<TestProv> =
-            (0..NUM_OPERATIONS).map(|i| TestProv { value: (i % 255) as u8 }).collect();
+            (0..NUM_OPERATIONS).map(|i| TestProv { value: (i % 255) as u128 }).collect();
 
         // Use a properly aligned base address
         const BASE_ADDR: usize = 0x7FFF_FFFF_AA00;
-
+        assert_eq!(BASE_ADDR % 8, 0);
         unsafe {
-            // Store values
-            for i in 0..NUM_OPERATIONS {
-                let addr = BASE_ADDR + (i * 8); // Use 8-byte alignment
-                println!("Address: {:#x}", addr);
-                let (l1, l2) = table_indices(addr);
-                heap.store_prov(&test_values[i], addr);
-                println!("HERE: {:?}", test_values[i].value);
+            for (i, test_value) in test_values.iter().enumerate().take(NUM_OPERATIONS) {
+                let addr = BASE_ADDR + (i * 8);
+                heap.store_prov(&TEST_HOOKS, test_value, addr);
+                let prov = heap.load_prov(addr);
+                assert_eq!(prov.value, test_value.value);
             }
 
-            // Load and verify values
-            for i in 0..NUM_OPERATIONS {
+            for (i, test_value) in test_values.iter().enumerate().take(NUM_OPERATIONS) {
                 let addr = BASE_ADDR + (i * 8);
-                println!("Address: {:#x}", addr);
-                let (l1, l2) = table_indices(addr);
-                let loaded = heap.load_prov(addr);
-                println!("HERE: {:?}", test_values[i].value);
-                println!("HERE: {:?}", loaded.value);
-                // assert_eq!(loaded.value, test_values[i].value);
+                let prov = heap.load_prov(addr);
+                assert_eq!(prov.value, test_value.value);
+                heap.store_prov(&TEST_HOOKS, test_value, addr);
             }
         }
-
-        teardown();
     }
 }
