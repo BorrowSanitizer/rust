@@ -3,12 +3,11 @@ FROM ubuntu:latest
 WORKDIR /usr/borsan
 
 ARG TARGETPLATFORM
-ARG TOOLCHAIN_PREFIX
-ARG ARTIFACT_URL_X86
-ARG ARTIFACT_URL_ARM
 
-ARG ARTIFACT_URL
+ARG PREFIX
+ARG URL
 ARG TARGET
+
 ARG TOOLCHAIN_DEST_DIR
 ENV DEBIAN_FRONTEND=noninteractive
 RUN which ldconfig
@@ -23,23 +22,13 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh\
 
 ENV PATH="$PATH:/root/.cargo/bin"
 
-RUN if [ "${TARGETPLATFORM}" = "linux/arm64" ]; then \
-        ARTIFACT_URL="${ARTIFACT_URL_ARM}"; \
-        TARGET="x86_64-unknown-linux-gnu"; \
-    elif [ "${TARGETPLATFORM}" = "linux/amd64" ]; then \
-        ARTIFACT_URL="${ARTIFACT_URL_X86}"; \
-        TARGET="aarch64-unknown-linux-gnu"; \
-    else \
-        echo "Unsupported platform: ${TARGETPLATFORM}"; \
-        exit 1; \
-    fi \ 
-    && TOOLCHAIN_DEST_DIR="/root/.rustup/toolchains/${TOOLCHAIN_PREFIX}-${TARGET}" \
+RUN TOOLCHAIN_DEST_DIR="/root/.rustup/toolchains/${PREFIX}-${TARGET}" \
     && mkdir -p "${TOOLCHAIN_DEST_DIR}" \
-    && curl -L -o rust.tar.gz "${ARTIFACT_URL}" \
+    && curl -L -o rust.tar.gz "${URL}" \
     && mkdir rust \
     && tar -xzf rust.tar.gz -C rust --strip-components=1 \
     && rm rust.tar.gz \
     && ./rust/install.sh --verbose --prefix="" --destdir="${TOOLCHAIN_DEST_DIR}" \
     && rm -rf rust
 
-ENV BORSAN_VERSION="${TOOLCHAIN_PREFIX}-${TARGET}"
+ENV BORSAN_VERSION="${PREFIX}-${TARGET}"

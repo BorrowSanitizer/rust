@@ -42,6 +42,10 @@ jobs:
             echo "$RUSTC_VERSION"
             echo "$RUSTC_SHA"
             echo "$RELEASE_NAME"
+<<<<<<< HEAD
+=======
+
+>>>>>>> f6974f27283 (Switched to 'target.xz' for release build file names.)
       - name: Check if updates have been published
         id: should_run
         continue-on-error: true
@@ -68,21 +72,30 @@ jobs:
         with:
           repository: BorrowSanitizer/rust
           fetch-depth: 0
+<<<<<<< HEAD
       
+=======
+
+>>>>>>> f6974f27283 (Switched to 'target.xz' for release build file names.)
       - name: Configure
         id: config
         continue-on-error: true
         run: |
           git config --global --add safe.directory $GITHUB_WORKSPACE
           src/ci/scripts/setup-upstream-remote.sh 
+<<<<<<< HEAD
           echo "artifact=${{ env.prefix }}-${{ needs.init.outputs.release_name }}-${{ matrix.config.target }}" >> $GITHUB_OUTPUT
           
+=======
+
+>>>>>>> f6974f27283 (Switched to 'target.xz' for release build file names.)
       - name: Install dependencies
         run: rustup component add llvm-tools-preview
 
       - name: Free up disk space
         run: src/ci/scripts/free-disk-space.sh
         if: matrix.config.free_disk
+<<<<<<< HEAD
         
       - name: Unit Tests
         run: ./x.py test --stage 1 src/tools/bsan/bsan-rt --config src/bootstrap/defaults/config.bsan.release.toml
@@ -90,20 +103,32 @@ jobs:
       - name: UI Tests
         run: ./x.py test --stage 2 src/tools/bsan/bsan-driver --config src/bootstrap/defaults/config.bsan.release.toml
         
+=======
+
+>>>>>>> f6974f27283 (Switched to 'target.xz' for release build file names.)
       - name: Dist
         run: ./x.py dist --config src/bootstrap/defaults/config.bsan.release.toml
         
       - name: Rename to target
         run: |
           mv ./build/dist/rust-${{ needs.init.outputs.rustc_version }}-dev-${{ matrix.config.target }}.tar.xz \
+<<<<<<< HEAD
             ./${{ steps.config.outputs.artifact }}.tar.xz 
+=======
+            ./${{ matrix.config.target }}.tar.xz 
+>>>>>>> f6974f27283 (Switched to 'target.xz' for release build file names.)
 
       - name: Publish
         uses: actions/upload-artifact@v4
         with:
           compression-level: 0
+<<<<<<< HEAD
           name: ${{ steps.config.outputs.artifact }}
           path: ./${{ steps.config.outputs.artifact }}.tar.xz
+=======
+          name: ${{ matrix.config.target }}
+          path: ${{ matrix.config.target }}.tar.xz
+>>>>>>> f6974f27283 (Switched to 'target.xz' for release build file names.)
           
   release:
     name: Update rolling release
@@ -164,6 +189,7 @@ jobs:
           gh api \
             -X PATCH \
             "/repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }}" \
+<<<<<<< HEAD
             -F "draft=false"
 
       - name: Trigger image workflow
@@ -171,3 +197,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run image --repo ${{ github.repository }}
+=======
+            -F "draft=false"
+>>>>>>> f6974f27283 (Switched to 'target.xz' for release build file names.)
