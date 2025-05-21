@@ -232,7 +232,16 @@ unsafe extern "C" fn bsan_deinit() {
 
 /// Creates a new borrow tag for the given provenance object.
 #[no_mangle]
-extern "C" fn bsan_retag(span: Span, prov: *mut Provenance, retag_kind: u8, place_kind: u8) {}
+extern "C" fn bsan_retag(
+    span: Span,
+    prov: *mut Provenance,
+    size: usize,
+    retag_kind: u8,
+    protector_kind: u8,
+    is_freeze: u8,
+    is_unpin: u8,
+) {
+}
 
 /// Records a read access of size `access_size` at the given address `addr` using the provenance `prov`.
 #[no_mangle]

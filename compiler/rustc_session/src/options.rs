@@ -454,7 +454,7 @@ mod desc {
     pub(crate) const parse_wasm_c_abi: &str = "`legacy` or `spec`";
     pub(crate) const parse_mir_include_spans: &str =
         "either a boolean (`yes`, `no`, `on`, `off`, etc), or `nll` (default: `nll`)";
-    pub(crate) const parse_aliasing_model: &str = "either 'tree' (default) or 'stack'";
+    pub(crate) const parse_borsan_retag_fields: &str = "one of `all`, `none`, or `scalar`";
 }
 
 pub mod parse {
@@ -1204,6 +1204,14 @@ pub mod parse {
         true
     }
 
+    pub(crate) fn parse_borsan_retag_fields(slot: &mut BsanRetagFields, v: Option<&str>) -> bool {
+        match v.and_then(|s| BsanRetagFields::from_str(s).ok()) {
+            Some(retagfields) => *slot = retagfields,
+            _ => return false,
+        }
+        true
+    }
+
     pub(crate) fn parse_remap_path_scope(
         slot: &mut RemapPathScopeComponents,
         v: Option<&str>,
@@ -1535,15 +1543,6 @@ pub mod parse {
 
         true
     }
-
-    pub(crate) fn parse_aliasing_model(slot: &mut AliasingModel, v: Option<&str>) -> bool {
-        *slot = match v {
-            Some("tree") => AliasingModel::Tree,
-            Some("stack") => AliasingModel::Stack,
-            _ => return false,
-        };
-        true
-    }
 }
 
 options! {
@@ -1690,8 +1689,6 @@ options! {
     // - src/doc/unstable-book/src/compiler-flags
 
     // tidy-alphabetical-start
-    aliasing_model: AliasingModel = (AliasingModel::Tree, parse_aliasing_model, [TRACKED],
-        "set the aliasing model ('tree' (default), 'stack')."),
     allow_features: Option<Vec<String>> = (None, parse_opt_comma_list, [TRACKED],
         "only allow the listed language features to be enabled in code (comma separated)"),
     always_encode_mir: bool = (false, parse_bool, [TRACKED],
@@ -1707,6 +1704,8 @@ options! {
         (default: no)"),
     box_noalias: bool = (true, parse_bool, [TRACKED],
         "emit noalias metadata for box (default: yes)"),
+    borsan_retag_fields: BsanRetagFields = (BsanRetagFields::default(), parse_borsan_retag_fields, [TRACKED],
+        "MIR optimization level (0-4; default: 1 in non optimized builds and 2 in optimized builds)"),
     branch_protection: Option<BranchProtection> = (None, parse_branch_protection, [TRACKED],
         "set options for branch target identification and pointer authentication on AArch64"),
     cf_protection: CFProtection = (CFProtection::None, parse_cfprotection, [TRACKED],
@@ -2155,6 +2154,8 @@ written to standard error output)"),
     #[rustc_lint_opt_deny_field_access("use `Session::ub_checks` instead of this field")]
     ub_checks: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "emit runtime checks for Undefined Behavior (default: -Cdebug-assertions)"),
+    unique_is_unique: Option<bool> = (None, parse_opt_bool, [TRACKED],
+        "treat"),
     ui_testing: bool = (false, parse_bool, [UNTRACKED],
         "emit compiler diagnostics in a form suitable for UI testing (default: no)"),
     uninit_const_chunk_threshold: usize = (16, parse_number, [TRACKED],

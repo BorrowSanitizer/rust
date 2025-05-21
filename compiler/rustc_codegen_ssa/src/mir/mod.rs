@@ -24,6 +24,7 @@ pub mod operand;
 pub mod place;
 mod rvalue;
 mod statement;
+mod retag;
 
 use self::debuginfo::{FunctionDebugContext, PerLocalVarDebugInfo};
 use self::operand::{OperandRef, OperandValue};

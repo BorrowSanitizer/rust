@@ -13,7 +13,7 @@ use rustc_codegen_ssa::traits::*;
 use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_hir::def_id::DefId;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
-use rustc_middle::mir::{PlaceKind, RetagKind};
+use rustc_middle::mir::{ProtectorKind, RetagKind};
 use rustc_middle::ty::layout::{
     FnAbiError, FnAbiOfHelpers, FnAbiRequest, HasTypingEnv, LayoutError, LayoutOfHelpers,
     TyAndLayout,
@@ -1166,14 +1166,20 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn retag(
         &mut self,
-        place: PlaceValue<&'ll Value>,
-        place_kind: PlaceKind,
+        place: PlaceValue<Self::Value>,
+        size: Size,
         retag_kind: RetagKind,
+        protector_kind: ProtectorKind,
+        is_freeze: bool,
+        is_unpin: bool,
     ) {
         self.call_intrinsic("llvm.bsan.retag", &[
             place.llval,
-            self.cx.const_i8(place_kind as i8),
+            self.cx.const_usize(size.bytes()),
             self.cx.const_i8(retag_kind as i8),
+            self.cx.const_i8(protector_kind as i8),
+            self.cx.const_i8(is_freeze as i8),
+            self.cx.const_i8(is_unpin as i8),
         ]);
     }
 

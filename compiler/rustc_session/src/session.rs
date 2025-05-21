@@ -40,8 +40,8 @@ use rustc_target::spec::{
 use crate::code_stats::CodeStats;
 pub use crate::code_stats::{DataTypeKind, FieldInfo, FieldKind, SizeKind, VariantInfo};
 use crate::config::{
-    self, CoverageLevel, CrateType, DebugInfo, ErrorOutputType, FunctionReturn, Input,
-    InstrumentCoverage, OptLevel, OutFileName, OutputType, RemapPathScopeComponents,
+    self, BsanRetagFields, CoverageLevel, CrateType, DebugInfo, ErrorOutputType, FunctionReturn,
+    Input, InstrumentCoverage, OptLevel, OutFileName, OutputType, RemapPathScopeComponents,
     SwitchWithOptPath,
 };
 use crate::filesearch::FileSearch;
@@ -624,6 +624,14 @@ impl Session {
     pub fn emit_retags(&self) -> bool {
         self.opts.unstable_opts.mir_emit_retag
             || self.opts.unstable_opts.sanitizer.intersects(SanitizerSet::BORROW)
+    }
+
+    pub fn retag_fields(&self) -> BsanRetagFields {
+        self.opts.unstable_opts.borsan_retag_fields
+    }
+
+    pub fn unique_is_unique(&self) -> bool {
+        self.opts.unstable_opts.unique_is_unique.unwrap_or(false)
     }
 
     pub fn diagnostic_width(&self) -> usize {
