@@ -18,6 +18,8 @@ use core::panic::PanicInfo;
 use core::ptr::NonNull;
 use core::{fmt, mem, ptr};
 
+use bsan_shared::*;
+
 mod global;
 pub use global::*;
 
@@ -236,11 +238,10 @@ extern "C" fn bsan_retag(
     span: Span,
     prov: *mut Provenance,
     size: usize,
-    retag_kind: u8,
+    perm_kind: u8,
     protector_kind: u8,
-    is_freeze: u8,
-    is_unpin: u8,
 ) {
+    let _ = unsafe { RetagInfo::from_raw(size, perm_kind, protector_kind) };
 }
 
 /// Records a read access of size `access_size` at the given address `addr` using the provenance `prov`.

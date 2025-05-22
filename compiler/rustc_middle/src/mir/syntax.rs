@@ -520,26 +520,6 @@ pub enum RetagKind {
     Default,
 }
 
-/// The flavor of the protector.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ProtectorKind {
-    /// Protected against aliasing violations from other pointers.
-    ///
-    /// Items protected like this cause UB when they are invalidated, *but* the pointer itself may
-    /// still be used to issue a deallocation.
-    ///
-    /// This is required for LLVM IR pointers that are `noalias` but *not* `dereferenceable`.
-    WeakProtector,
-
-    /// Protected against any kind of invalidation.
-    ///
-    /// Items protected like this cause UB when they are invalidated or the memory is deallocated.
-    /// This is strictly stronger protection than `WeakProtector`.
-    ///
-    /// This is required for LLVM IR pointers that are `dereferenceable` (and also allows `noalias`).
-    StrongProtector,
-}
-
 /// The `FakeReadCause` describes the type of pattern why a FakeRead statement exists.
 #[derive(Copy, Clone, TyEncodable, TyDecodable, Debug, Hash, HashStable, PartialEq)]
 pub enum FakeReadCause {

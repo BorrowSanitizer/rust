@@ -1,10 +1,12 @@
 use std::marker::PhantomData;
 
+use bsan_shared::{Permission, ProtectorKind, RetagInfo};
+//use bsan_shared::Permission;
 use rustc_abi::{BackendRepr, FieldIdx, FieldsShape, VariantIdx, Variants};
 use rustc_hir::def_id::DefId;
-use rustc_middle::mir::{Place, ProtectorKind, RetagKind};
+use rustc_middle::mir::{Place, RetagKind};
 use rustc_middle::ty::layout::{HasTyCtxt, TyAndLayout};
-use rustc_middle::ty::{self};
+use rustc_middle::ty::{self, Mutability};
 use rustc_session::config::BsanRetagFields;
 use tracing::trace;
 
@@ -96,19 +98,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         visitor.visit_value(bx, base.layout);
     }
 
-    fn retag(&self, bx: &mut Bx, place: PlaceRef<'tcx, Bx::Value>) {
-        let is_freeze = place.layout.ty.is_freeze(bx.tcx(), bx.typing_env());
-        let is_unpin = place.layout.ty.is_unpin(bx.tcx(), bx.typing_env());
-        bx.retag(
-            place.val,
-            place.layout.size,
-            self.kind,
-            ProtectorKind::StrongProtector,
-            is_freeze,
-            is_unpin,
-        )
-    }
-
     /// Applies each of the current modifiers to the base PlaceRef, cg-ing along the way.
     #[allow(dead_code)]
     fn crystallize(&mut self, bx: &mut Bx) -> PlaceRef<'tcx, Bx::Value> {
@@ -146,9 +135,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
             // If it is a trait object, switch to the real type that was used to create it.
             ty::Dynamic(_data, _, ty::Dyn) => {}
             ty::Dynamic(_data, _, ty::DynStar) => {}
-            &ty::Ref(..) => {
+            &ty::Ref(_, _, mutability) => {
                 let place = self.crystallize(bx);
-                self.retag(bx, place);
+                self.retag_ref_ty(bx, place, mutability);
             }
 
             ty::RawPtr(_, _) => {
@@ -167,7 +156,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                 if self.unique_did == Some(adt.did()) {
                     let place = self.crystallize(bx);
                     let place = self.inner_ptr_of_unique(bx, place);
-                    self.retag(bx, place);
+                    self.retag_unique_ty(bx, place, true);
                 }
             }
             _ => {
@@ -244,6 +233,57 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         nonnull_ptr.project_field(bx, 0)
     }
 
+    fn retag_ref_ty(
+        &mut self,
+        bx: &mut Bx,
+        pointee: PlaceRef<'tcx, Bx::Value>,
+        mutability: Mutability,
+    ) {
+        let ty_is_freeze = pointee.layout.ty.is_freeze(bx.tcx(), bx.typing_env());
+        let ty_is_unpin = pointee.layout.ty.is_unpin(bx.tcx(), bx.typing_env());
+        let is_protected = self.kind == RetagKind::FnEntry;
+
+        let perm_kind = match mutability {
+            Mutability::Not if ty_is_unpin => Permission::new_reserved(ty_is_freeze, is_protected),
+            Mutability::Mut if ty_is_freeze => Permission::new_frozen(),
+            // Raw pointers never enter this function so they are not handled.
+            // However raw pointers are not the only pointers that take the parent
+            // tag, this also happens for `!Unpin` `&mut`s and interior mutable
+            // `&`s, which are excluded above.
+            _ => return,
+        };
+
+        let size = pointee.layout.size.bytes_usize();
+
+        let protector_kind =
+            if is_protected { ProtectorKind::StrongProtector } else { ProtectorKind::NoProtector };
+        let perm = RetagInfo::new(size, perm_kind, protector_kind);
+        bx.retag(pointee.val, perm);
+    }
+
+    /// Compute permission for `Box`-like type (`Box` always, and also `Unique` if enabled).
+    /// These pointers allow deallocation so need a different kind of protector not handled
+    /// by `from_ref_ty`.
+    fn retag_unique_ty(&mut self, bx: &mut Bx, place: PlaceRef<'tcx, Bx::Value>, zero_size: bool) {
+        let ty = place.layout.ty;
+        let ty_is_unpin = ty.is_unpin(bx.tcx(), bx.typing_env());
+        if ty_is_unpin {
+            let ty_is_freeze = ty.is_freeze(bx.tcx(), bx.typing_env());
+            let is_protected = self.kind == RetagKind::FnEntry;
+            let size = if zero_size { 0 } else { place.layout.size.bytes_usize() };
+            let protector_kind: ProtectorKind = if is_protected {
+                ProtectorKind::WeakProtector
+            } else {
+                ProtectorKind::NoProtector
+            };
+
+            let perm_kind = Permission::new_reserved(ty_is_freeze, is_protected);
+            let perm = RetagInfo::new(size, perm_kind, protector_kind);
+            bx.retag(place.val, perm);
+            todo!()
+        }
+    }
+
     /// Traversal logic; should not be overloaded.
     fn walk_value(&mut self, bx: &mut Bx, layout: TyAndLayout<'tcx>) {
         let ty = layout.ty;
@@ -265,7 +305,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                     let current_place = self.crystallize(bx);
                     let unique_ptr = current_place.project_field(bx, 0);
                     let inner_ptr = self.inner_ptr_of_unique(bx, unique_ptr);
-                    self.retag(bx, inner_ptr);
+                    self.retag_unique_ty(bx, inner_ptr, false);
                 }
 
                 // The second `Box` field is the allocator, which we recursively check for validity
@@ -302,15 +342,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         }
 
         match &layout.variants {
-            // If this is a multi-variant layout, find the right variant and proceed
-            // with *its* fields.
             Variants::Multiple { tag_field, variants, .. } => {
                 self.modifiers.push(Modifier::Field(FieldIdx::from_usize(*tag_field)));
                 for vidx in variants.indices().into_iter() {
                     self.visit_variant(bx, layout, vidx);
                 }
             }
-            // For single-variant layouts, we already did anything there is to do.
             Variants::Single { .. } => {}
         }
     }

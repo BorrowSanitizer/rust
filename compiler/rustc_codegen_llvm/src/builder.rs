@@ -5,15 +5,14 @@ use std::{iter, ptr};
 use libc::{c_char, c_uint};
 use rustc_abi as abi;
 use rustc_abi::{Align, Size, WrappingRange};
-use rustc_codegen_ssa::MemFlags;
 use rustc_codegen_ssa::common::{IntPredicate, RealPredicate, SynchronizationScope, TypeKind};
 use rustc_codegen_ssa::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa::mir::place::{PlaceRef, PlaceValue};
 use rustc_codegen_ssa::traits::*;
+use rustc_codegen_ssa::{MemFlags, RetagInfo};
 use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_hir::def_id::DefId;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
-use rustc_middle::mir::{ProtectorKind, RetagKind};
 use rustc_middle::ty::layout::{
     FnAbiError, FnAbiOfHelpers, FnAbiRequest, HasTypingEnv, LayoutError, LayoutOfHelpers,
     TyAndLayout,
@@ -1164,22 +1163,12 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         self.call_lifetime_intrinsic("llvm.lifetime.end.p0i8", ptr, size);
     }
 
-    fn retag(
-        &mut self,
-        place: PlaceValue<Self::Value>,
-        size: Size,
-        retag_kind: RetagKind,
-        protector_kind: ProtectorKind,
-        is_freeze: bool,
-        is_unpin: bool,
-    ) {
+    fn retag(&mut self, place: PlaceValue<Self::Value>, info: RetagInfo) {
         self.call_intrinsic("llvm.bsan.retag", &[
             place.llval,
-            self.cx.const_usize(size.bytes()),
-            self.cx.const_i8(retag_kind as i8),
-            self.cx.const_i8(protector_kind as i8),
-            self.cx.const_i8(is_freeze as i8),
-            self.cx.const_i8(is_unpin as i8),
+            self.const_usize(info.size as u64),
+            self.const_u8(info.perm_kind.into()),
+            self.const_u8(info.protector_kind as u8),
         ]);
     }
 
