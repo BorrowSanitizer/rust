@@ -42,12 +42,6 @@ mod cfg;
 mod native_libs;
 pub mod sigpipe;
 
-#[derive(Clone, Copy, PartialEq, Hash, Debug)]
-pub enum AliasingModel {
-    Stack,
-    Tree,
-}
-
 /// The different settings that the `-C strip` flag can have.
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
 pub enum Strip {
@@ -2911,7 +2905,7 @@ pub(crate) mod dep_tracking {
     };
 
     use super::{
-        AliasingModel, BranchProtection, CFGuard, CFProtection, CollapseMacroDebuginfo,
+        BranchProtection, BsanRetagFields, CFGuard, CFProtection, CollapseMacroDebuginfo,
         CoverageOptions, CrateType, DebugInfo, DebugInfoCompression, ErrorOutputType, FmtDebug,
         FunctionReturn, InliningThreshold, InstrumentCoverage, InstrumentXRay, LinkerPluginLto,
         LocationDetail, LtoCli, NextSolverConfig, OomStrategy, OptLevel, OutFileName, OutputType,
@@ -3017,7 +3011,7 @@ pub(crate) mod dep_tracking {
         InliningThreshold,
         FunctionReturn,
         WasmCAbi,
-        AliasingModel
+        BsanRetagFields
     );
 
     impl<T1, T2> DepTrackingHash for (T1, T2)
@@ -3290,5 +3284,30 @@ impl MirIncludeSpans {
     /// purposes, except for the NLL MIR dump pass.
     pub fn is_enabled(self) -> bool {
         self == MirIncludeSpans::On
+    }
+}
+/// Whether retagging recurses into fields. `All` means it always recurses (the default,
+/// and equivalent to -Zmiri-retag-fields without an explicit value), `None` means it never
+/// recurses, `Scalar` means it only recurses for types where we would also emit noalias annotations
+/// in the generated LLVM IR (types passed as individual scalars or pairs of scalars). Setting this
+/// to `None`` is unsound.
+#[derive(Clone, Copy, Default, PartialEq, Hash, Debug)]
+pub enum BsanRetagFields {
+    #[default]
+    All,
+    None,
+    Scalar,
+}
+
+impl FromStr for BsanRetagFields {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        Ok(match s {
+            "all" => BsanRetagFields::All,
+            "none" => BsanRetagFields::None,
+            "scalar" => BsanRetagFields::Scalar,
+            _ => return Err(()),
+        })
     }
 }

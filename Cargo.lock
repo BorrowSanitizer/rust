@@ -306,12 +306,17 @@ dependencies = [
 name = "bsan-rt"
 version = "0.1.0"
 dependencies = [
+ "bsan-shared",
  "cbindgen",
  "hashbrown 0.15.2",
  "libc",
  "rustc-hash 2.1.1",
  "smallvec",
 ]
+
+[[package]]
+name = "bsan-shared"
+version = "0.1.0"
 
 [[package]]
 name = "bstr"
@@ -3546,6 +3551,7 @@ dependencies = [
  "ar_archive_writer",
  "arrayvec",
  "bitflags 2.6.0",
+ "bsan-shared",
  "cc",
  "either",
  "itertools",

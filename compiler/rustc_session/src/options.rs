@@ -454,7 +454,7 @@ mod desc {
     pub(crate) const parse_wasm_c_abi: &str = "`legacy` or `spec`";
     pub(crate) const parse_mir_include_spans: &str =
         "either a boolean (`yes`, `no`, `on`, `off`, etc), or `nll` (default: `nll`)";
-    pub(crate) const parse_aliasing_model: &str = "either 'tree' (default) or 'stack'";
+    pub(crate) const parse_bsan_retag_fields: &str = "one of `all`, `none`, or `scalar`";
 }
 
 pub mod parse {
@@ -1204,6 +1204,14 @@ pub mod parse {
         true
     }
 
+    pub(crate) fn parse_bsan_retag_fields(slot: &mut BsanRetagFields, v: Option<&str>) -> bool {
+        match v.and_then(|s| BsanRetagFields::from_str(s).ok()) {
+            Some(retagfields) => *slot = retagfields,
+            _ => return false,
+        }
+        true
+    }
+
     pub(crate) fn parse_remap_path_scope(
         slot: &mut RemapPathScopeComponents,
         v: Option<&str>,
@@ -1535,15 +1543,6 @@ pub mod parse {
 
         true
     }
-
-    pub(crate) fn parse_aliasing_model(slot: &mut AliasingModel, v: Option<&str>) -> bool {
-        *slot = match v {
-            Some("tree") => AliasingModel::Tree,
-            Some("stack") => AliasingModel::Stack,
-            _ => return false,
-        };
-        true
-    }
 }
 
 options! {
@@ -1690,8 +1689,6 @@ options! {
     // - src/doc/unstable-book/src/compiler-flags
 
     // tidy-alphabetical-start
-    aliasing_model: AliasingModel = (AliasingModel::Tree, parse_aliasing_model, [TRACKED],
-        "set the aliasing model ('tree' (default), 'stack')."),
     allow_features: Option<Vec<String>> = (None, parse_opt_comma_list, [TRACKED],
         "only allow the listed language features to be enabled in code (comma separated)"),
     always_encode_mir: bool = (false, parse_bool, [TRACKED],
@@ -1707,6 +1704,11 @@ options! {
         (default: no)"),
     box_noalias: bool = (true, parse_bool, [TRACKED],
         "emit noalias metadata for box (default: yes)"),
+    bsan_retag_fields: BsanRetagFields = (BsanRetagFields::default(), parse_bsan_retag_fields, [TRACKED],
+        "control whether retags are recursively applied to the fields of a place (default: `all`). \
+        `all` emits retags for every field.
+        `none` skips retagging fields. This option is unsound.
+        `scalar` only retags fields of values with a scalar ABI."),
     branch_protection: Option<BranchProtection> = (None, parse_branch_protection, [TRACKED],
         "set options for branch target identification and pointer authentication on AArch64"),
     cf_protection: CFProtection = (CFProtection::None, parse_cfprotection, [TRACKED],

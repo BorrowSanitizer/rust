@@ -58,6 +58,8 @@ pub mod size_of_val;
 pub mod target_features;
 pub mod traits;
 
+pub use bsan_shared::RetagInfo;
+
 rustc_fluent_macro::fluent_messages! { "../messages.ftl" }
 
 pub struct ModuleCodegen<M> {

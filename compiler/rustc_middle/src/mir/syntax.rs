@@ -520,15 +520,6 @@ pub enum RetagKind {
     Default,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, TyEncodable, TyDecodable, Debug, PartialEq, Eq, Hash, HashStable)]
-#[rustc_pass_by_value]
-pub enum PlaceKind {
-    Freeze,
-    Unpin,
-    Default,
-}
-
 /// The `FakeReadCause` describes the type of pattern why a FakeRead statement exists.
 #[derive(Copy, Clone, TyEncodable, TyDecodable, Debug, Hash, HashStable, PartialEq)]
 pub enum FakeReadCause {

@@ -18,6 +18,8 @@ use core::panic::PanicInfo;
 use core::ptr::NonNull;
 use core::{fmt, mem, ptr};
 
+use bsan_shared::*;
+
 mod global;
 pub use global::*;
 
@@ -232,7 +234,15 @@ unsafe extern "C" fn bsan_deinit() {
 
 /// Creates a new borrow tag for the given provenance object.
 #[no_mangle]
-extern "C" fn bsan_retag(span: Span, prov: *mut Provenance, retag_kind: u8, place_kind: u8) {}
+extern "C" fn bsan_retag(
+    span: Span,
+    prov: *mut Provenance,
+    size: usize,
+    perm_kind: u8,
+    protector_kind: u8,
+) {
+    let _ = unsafe { RetagInfo::from_raw(size, perm_kind, protector_kind) };
+}
 
 /// Records a read access of size `access_size` at the given address `addr` using the provenance `prov`.
 #[no_mangle]

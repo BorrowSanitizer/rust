@@ -29,6 +29,7 @@ members = [
   "src/tools/rustfmt",
   "src/tools/miri",
   "src/tools/miri/cargo-miri",
+  "src/tools/bsan/bsan-shared/",
   "src/tools/bsan/bsan-driver/",
   "src/tools/bsan/bsan-driver/cargo-bsan",
   "src/tools/bsan/bsan-rt/",
@@ -49,7 +50,7 @@ members = [
   "src/tools/opt-dist",
   "src/tools/coverage-dump",
   "src/tools/rustc-perf-wrapper",
-  "src/tools/wasm-component-ld", 
+  "src/tools/wasm-component-ld", "src/tools/bsan/bsan-shared", 
 ]
 
 exclude = [

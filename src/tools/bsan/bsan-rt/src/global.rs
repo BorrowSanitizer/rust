@@ -91,10 +91,10 @@ impl GlobalCtx {
     /// to be called directly; instead, it should be used with the `print!`,
     /// `println!`, and `ui_test!` macros.
     pub fn print(&self, args: fmt::Arguments<'_>) {
-        let mut w = BVec::new(self);
-        let _ = write!(&mut w, "{}", args);
+        let mut buffer = BVec::new(self);
+        let _ = write!(&mut buffer, "{args}");
         unsafe {
-            (self.hooks.print)(mem::transmute(w.as_ptr()));
+            (self.hooks.print)(mem::transmute(buffer.as_ptr()));
         }
     }
 }
