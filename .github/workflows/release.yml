@@ -86,10 +86,10 @@ jobs:
         if: matrix.config.free_disk
         
       - name: Unit Tests
-        run: ./x.py test --stage 1 src/tools/bsan/bsan-rt
+        run: ./x.py test --stage 1 src/tools/bsan/bsan-rt --config src/bootstrap/defaults/config.bsan.release.toml
         
       - name: UI Tests
-        run: ./x.py test --stage 2 src/tools/bsan/bsan-driver
+        run: ./x.py test --stage 2 src/tools/bsan/bsan-driver --config src/bootstrap/defaults/config.bsan.release.toml
         
       - name: Dist
         run: ./x.py dist --config src/bootstrap/defaults/config.bsan.release.toml
