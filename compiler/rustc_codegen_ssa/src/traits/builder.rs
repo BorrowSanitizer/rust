@@ -337,11 +337,7 @@ pub trait BuilderMethods<'a, 'tcx>:
         flags: MemFlags,
     );
 
-    fn retag(
-        &mut self,
-        place: PlaceValue<Self::Value>,
-        perm: RetagInfo,
-    );
+    fn retag(&mut self, place: PlaceValue<Self::Value>, perm: RetagInfo);
 
     /// *Typed* copy for non-overlapping places.
     ///
