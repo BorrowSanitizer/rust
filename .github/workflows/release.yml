@@ -84,7 +84,13 @@ jobs:
       - name: Free up disk space
         run: src/ci/scripts/free-disk-space.sh
         if: matrix.config.free_disk
-
+        
+      - name: Unit Tests
+        run: ./x.py test --stage 1 src/tools/bsan/bsan-rt
+        
+      - name: UI Tests
+        run: ./x.py test --stage 2 src/tools/bsan/bsan-driver
+        
       - name: Dist
         run: ./x.py dist --config src/bootstrap/defaults/config.bsan.release.toml
         
