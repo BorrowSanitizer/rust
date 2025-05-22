@@ -94,7 +94,7 @@ impl GlobalCtx {
         let mut buffer = BVec::new(self);
         let _ = write!(&mut buffer, "{args}");
         unsafe {
-            (self.hooks.print)(mem::transmute(w.as_ptr()));
+            (self.hooks.print)(mem::transmute(buffer.as_ptr()));
         }
     }
 }

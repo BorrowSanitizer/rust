@@ -627,11 +627,7 @@ impl Session {
     }
 
     pub fn retag_fields(&self) -> BsanRetagFields {
-        self.opts.unstable_opts.borsan_retag_fields
-    }
-
-    pub fn unique_is_unique(&self) -> bool {
-        self.opts.unstable_opts.unique_is_unique.unwrap_or(false)
+        self.opts.unstable_opts.bsan_retag_fields
     }
 
     pub fn diagnostic_width(&self) -> usize {

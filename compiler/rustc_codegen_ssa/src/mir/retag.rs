@@ -1,9 +1,7 @@
 use std::marker::PhantomData;
 
 use bsan_shared::{Permission, ProtectorKind, RetagInfo};
-//use bsan_shared::Permission;
 use rustc_abi::{BackendRepr, FieldIdx, FieldsShape, VariantIdx, Variants};
-use rustc_hir::def_id::DefId;
 use rustc_middle::mir::{Place, RetagKind};
 use rustc_middle::ty::layout::{HasTyCtxt, TyAndLayout};
 use rustc_middle::ty::{self, Mutability};
@@ -79,20 +77,16 @@ struct RetagCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     places: Vec<PlaceRef<'tcx, Bx::Value>>,
     modifiers: Vec<Modifier>,
     branches: Vec<Bx::BasicBlock>,
-    unique_did: Option<DefId>,
     data: PhantomData<&'a ()>,
 }
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
     fn visit(bx: &mut Bx, base: PlaceRef<'tcx, Bx::Value>, kind: RetagKind) {
-        let unique_did =
-            bx.cx().sess().unique_is_unique().then(|| bx.tcx().lang_items().ptr_unique()).flatten();
         let mut visitor = Self {
             kind,
             places: vec![base],
             modifiers: vec![],
             branches: vec![],
-            unique_did,
             data: PhantomData::default(),
         };
         visitor.visit_value(bx, base.layout);
@@ -151,13 +145,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                 // (Yes this means we technically also recursively retag the allocator itself
                 // even if field retagging is not enabled. *shrug*)
                 self.walk_value(bx, layout);
-            }
-            ty::Adt(adt, _) => {
-                if self.unique_did == Some(adt.did()) {
-                    let place = self.crystallize(bx);
-                    let place = self.inner_ptr_of_unique(bx, place);
-                    self.retag_unique_ty(bx, place, true);
-                }
             }
             _ => {
                 // Not a reference/pointer/box. Only recurse if configured appropriately.
@@ -264,13 +251,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
     /// Compute permission for `Box`-like type (`Box` always, and also `Unique` if enabled).
     /// These pointers allow deallocation so need a different kind of protector not handled
     /// by `from_ref_ty`.
-    fn retag_unique_ty(&mut self, bx: &mut Bx, place: PlaceRef<'tcx, Bx::Value>, zero_size: bool) {
+    fn retag_unique_ty(&mut self, bx: &mut Bx, place: PlaceRef<'tcx, Bx::Value>) {
         let ty = place.layout.ty;
         let ty_is_unpin = ty.is_unpin(bx.tcx(), bx.typing_env());
         if ty_is_unpin {
             let ty_is_freeze = ty.is_freeze(bx.tcx(), bx.typing_env());
             let is_protected = self.kind == RetagKind::FnEntry;
-            let size = if zero_size { 0 } else { place.layout.size.bytes_usize() };
+            let size = place.layout.size.bytes_usize();
             let protector_kind: ProtectorKind = if is_protected {
                 ProtectorKind::WeakProtector
             } else {
@@ -305,7 +292,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                     let current_place = self.crystallize(bx);
                     let unique_ptr = current_place.project_field(bx, 0);
                     let inner_ptr = self.inner_ptr_of_unique(bx, unique_ptr);
-                    self.retag_unique_ty(bx, inner_ptr, false);
+                    self.retag_unique_ty(bx, inner_ptr);
                 }
 
                 // The second `Box` field is the allocator, which we recursively check for validity
