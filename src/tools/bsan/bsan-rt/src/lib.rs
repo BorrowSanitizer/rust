@@ -56,18 +56,21 @@ unsafe impl Allocator for BsanAllocHooks {
         unsafe {
             match layout.size() {
                 0 => Ok(NonNull::slice_from_raw_parts(layout.dangling(), 0)),
-                // SAFETY: `layout` is non-zero in size,
-                size => unsafe {
-                    let raw_ptr: *mut u8 = mem::transmute((self.malloc)(layout.size()));
-                    let ptr = NonNull::new(raw_ptr).ok_or(AllocError)?;
+                size => {
+                    let ptr = (self.malloc)(layout.size());
+                    if ptr.is_null() {
+                        return Err(AllocError);
+                    }
+                    let ptr = NonNull::new_unchecked(ptr as *mut u8);
                     Ok(NonNull::slice_from_raw_parts(ptr, size))
-                },
+                }
             }
         }
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, _layout: Layout) {
-        (self.free)(mem::transmute(ptr.as_ptr()))
+        let ptr = mem::transmute::<*mut u8, *mut libc::c_void>(ptr.as_ptr());
+        (self.free)(ptr);
     }
 }
 
@@ -152,11 +155,17 @@ pub type Span = usize;
 /// and a borrow tag. We also include a pointer to the "lock" location for the allocation,
 /// which contains all other metadata used to detect undefined behavior.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Provenance {
     pub alloc_id: AllocId,
     pub bor_tag: BorTag,
     pub alloc_info: *mut c_void,
+}
+
+impl Default for Provenance {
+    fn default() -> Self {
+        Provenance::null()
+    }
 }
 
 impl Provenance {
@@ -214,7 +223,7 @@ impl AllocInfo {
 #[no_mangle]
 unsafe extern "C" fn bsan_init(hooks: BsanHooks) {
     let ctx = init_global_ctx(hooks);
-    let ctx = unsafe { &*ctx };
+    let ctx = unsafe { ctx };
     init_local_ctx(ctx);
     ui_test!(ctx, "bsan_init");
 }
@@ -224,7 +233,7 @@ unsafe extern "C" fn bsan_init(hooks: BsanHooks) {
 /// will be called after this function has executed.
 #[no_mangle]
 unsafe extern "C" fn bsan_deinit() {
-    let global_ctx = unsafe { &*global_ctx() };
+    let global_ctx = unsafe { global_ctx() };
     ui_test!(global_ctx, "bsan_deinit");
     deinit_local_ctx();
     deinit_global_ctx();
@@ -257,15 +266,25 @@ extern "C" fn bsan_shadow_clear(addr: usize, access_size: usize) {}
 /// Loads the provenance of a given address from shadow memory and stores
 /// the result in the return pointer.
 #[no_mangle]
-extern "C" fn bsan_load_prov(prov: *mut MaybeUninit<Provenance>, addr: usize) {
-    unsafe {
-        (*prov).write(Provenance::null());
-    }
+unsafe extern "C" fn bsan_load_prov(prov: *mut Provenance, addr: usize) {
+    debug_assert!(!prov.is_null());
+
+    let ctx = global_ctx();
+    let heap = ctx.shadow_heap();
+
+    *prov = heap.load_prov(addr);
 }
 
 /// Stores the given provenance value into shadow memory at the location for the given address.
 #[no_mangle]
-extern "C" fn bsan_store_prov(prov: *const Provenance, addr: usize) {}
+unsafe extern "C" fn bsan_store_prov(prov: *const Provenance, addr: usize) {
+    debug_assert!(!prov.is_null());
+
+    let ctx = global_ctx();
+    let heap = ctx.shadow_heap();
+
+    heap.store_prov(ctx.hooks(), prov, addr);
+}
 
 /// Pushes a shadow stack frame
 #[no_mangle]

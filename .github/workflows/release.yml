@@ -42,7 +42,6 @@ jobs:
             echo "$RUSTC_VERSION"
             echo "$RUSTC_SHA"
             echo "$RELEASE_NAME"
-
       - name: Check if updates have been published
         id: should_run
         continue-on-error: true

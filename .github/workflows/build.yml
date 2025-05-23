@@ -24,10 +24,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Switch to nightly
+        run: |
+          rustup default ${{ vars.BSAN_TOOLCHAIN }}
+          rustup component add rust-src rustc-dev llvm-tools-preview clippy
       - name: Upstream
         run: src/ci/scripts/setup-upstream-remote.sh
       - name: Format
         run: ./x.py fmt --check
+      - name: Clippy (bsan-rt)
+        run: |
+          cd src/tools/bsan/bsan-rt
+          RUSTFLAGS='-C panic=abort -Zpanic_abort_tests' cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy (bsan-driver)
+        run: |
+          cd src/tools/bsan/bsan-driver
+          cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy (cargo-bsan)
+        run: |
+          cd src/tools/bsan/bsan-driver/cargo-bsan
+          cargo clippy --all-targets --all-features -- -D warnings
   build:
     needs: [fmt]
     strategy:
@@ -84,3 +100,4 @@ jobs:
         run: ./x.py test --stage 1 src/tools/bsan/bsan-rt
       - name: UI Tests
         run: ./x.py test --stage 2 src/tools/bsan/bsan-driver
+      

@@ -52,7 +52,7 @@ pub fn phase_cargo_bsan(mut args: impl Iterator<Item = String>) {
         return;
     }
 
-    setup(&subcommand, &rustc_version.host.as_str(), &rustc_version, verbose, quiet);
+    setup(&subcommand, rustc_version.host.as_str(), &rustc_version, verbose, quiet);
 
     let bsan_sysroot = get_target_sysroot_dir();
     let bsan_path = find_bsan();
