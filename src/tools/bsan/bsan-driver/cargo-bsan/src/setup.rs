@@ -160,7 +160,7 @@ pub fn setup(
             } else {
                 // Keep all output on a single line.
                 eprint!("... ");
-                after_build_output = format!("done\n");
+                after_build_output = "done\n".to_string();
             }
         }
     };
