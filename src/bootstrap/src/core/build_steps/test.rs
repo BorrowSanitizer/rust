@@ -501,7 +501,7 @@ impl Step for BsanRTCore {
             &[],
         );
         cargo.add_rustc_lib_path(builder);
-        run_cargo_test(cargo, &[], &[], "bsan-rt", "bsan-rt", compiler, host, builder);
+        run_cargo_test(cargo, &[], &[], "bsan-rt", self.host, builder);
     }
 }
 
@@ -599,14 +599,12 @@ impl Step for BsanDriver {
         let bsan_driver = builder.ensure(tool::BsanDriver {
             compiler: host_compiler,
             target: host,
-            extra_features: Vec::new(),
         });
 
         // the ui tests also assume cargo-bsan has been built
         builder.ensure(tool::CargoBsan {
             compiler: host_compiler,
             target: host,
-            extra_features: Vec::new(),
         });
 
         // We also need sysroots, for BSAN and for the host (the latter for build scripts).
@@ -628,7 +626,7 @@ impl Step for BsanDriver {
             // The mtime of `miri_sysroot` changes when the sysroot gets rebuilt (also see
             // <https://github.com/RalfJung/rustc-build-sysroot/commit/10ebcf60b80fe2c3dc765af0ff19fdc0da4b7466>).
             // We can hence use that directly as a signal to clear the ui test dir.
-            builder.clear_if_dirty(&ui_test_dep_dir, &bsan_sysroot);
+            build_stamp::clear_if_dirty(builder, &ui_test_dep_dir, &bsan_sysroot);
         }
 
         // Run `cargo test`.
@@ -648,7 +646,7 @@ impl Step for BsanDriver {
 
         // We can NOT use `run_cargo_test` since BSAN's integration tests do not use the usual test
         // harness and therefore do not understand the flags added by `add_flags_and_try_run_test`.
-        let mut cargo = prepare_cargo_test(cargo, &[], &[], "bsan", host_compiler, host, builder);
+        let mut cargo = prepare_cargo_test(cargo, &[], &[], self.target, builder);
 
         // bsan tests need to know about the stage sysroot
 
@@ -663,7 +661,7 @@ impl Step for BsanDriver {
         // sysroot automatically.
 
         cargo.env("BSAN_RT_SYSROOT", &builder.sysroot(host_compiler));
-        cargo.env("BSAN", &bsan_driver);
+        cargo.env("BSAN", &bsan_driver.tool_path);
 
         // Set the target.
         cargo.env("BSAN_TEST_TARGET", target.rustc_target_arg());

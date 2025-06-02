@@ -144,7 +144,7 @@ impl Step for BsanRT {
         // way to declare an external static archive (libbsan_rt.a) as a build dependency
         // of another static archive (libclang-rt-<arch>.bsan.a) in CMake—at least, not if
         // the external archive contains an unknown, varying quantity of object files.
-        if !is_dylib(&lib_name) {
+        if !is_dylib(&PathBuf::from(&lib_name)) {
             let temp_dir = builder.build.tempdir().join("bsan-rt");
             if temp_dir.exists() {
                 fs::remove_dir_all(&temp_dir).unwrap();
@@ -185,9 +185,7 @@ impl Step for BsanRT {
                 .args(file_names)
                 .run(builder);
         }
-
-        builder.copy_link(&cpp_runtime.path, &dst);
-
+        builder.copy_link(&cpp_runtime.path, &dst, FileType::NativeLibrary);
         if target.contains("-apple-") {
             // Update the library’s install name to reflect that it has been renamed.
             apple_darwin_update_library_name(builder, &dst, &format!("@rpath/{}", &lib_name));
@@ -195,7 +193,7 @@ impl Step for BsanRT {
             // so we will sign it again.
             apple_darwin_sign_file(builder, &dst);
         }
-        builder.copy_link(&dst, &rustc_dst);
+        builder.copy_link(&dst, &rustc_dst, FileType::NativeLibrary);
         rustc_dst
     }
 }

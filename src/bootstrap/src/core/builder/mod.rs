@@ -1464,16 +1464,14 @@ impl<'a> Builder<'a> {
         let bsan = self.ensure(tool::BsanDriver {
             compiler: build_compiler,
             target: self.build.build,
-            extra_features: Vec::new(),
         });
         let cargo_bsan = self.ensure(tool::CargoBsan {
             compiler: build_compiler,
             target: self.build.build,
-            extra_features: Vec::new(),
         });
         // Invoke cargo-miri, make sure it can find miri and cargo.
-        let mut cmd = command(cargo_bsan);
-        cmd.env("BSAN", &bsan);
+        let mut cmd = command(cargo_bsan.tool_path);
+        cmd.env("BSAN", &bsan.tool_path);
         cmd.env("CARGO", &self.initial_cargo);
         // Need to add the `run_compiler` libs. Those are the libs produces *by* `build_compiler`,
         // so they match the Miri we just built. However this means they are actually living one

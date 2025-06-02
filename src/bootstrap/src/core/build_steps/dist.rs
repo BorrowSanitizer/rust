@@ -1337,16 +1337,16 @@ impl Step for Bsan {
 
         let bsanrt = builder.ensure(BsanRT { compiler, target });
         let bsandriver =
-            builder.ensure(tool::BsanDriver { compiler, target, extra_features: Vec::new() });
+            builder.ensure(tool::BsanDriver { compiler, target });
         let cargobsan =
-            builder.ensure(tool::CargoBsan { compiler, target, extra_features: Vec::new() });
+            builder.ensure(tool::CargoBsan { compiler, target });
 
         let mut tarball = Tarball::new(builder, "bsan", &target.triple);
         tarball.set_overlay(OverlayKind::Bsan);
         tarball.is_preview(true);
-        tarball.add_file(bsandriver, "bin", 0o755);
-        tarball.add_file(cargobsan, "bin", 0o755);
-        tarball.add_file(bsanrt, "lib", 0o755);
+        tarball.add_file(&bsandriver.tool_path, "bin", FileType::Executable);
+        tarball.add_file(&cargobsan.tool_path, "bin", FileType::Executable);
+        tarball.add_file(bsanrt, "lib", FileType::NativeLibrary);
         tarball.add_legal_and_readme_to("share/doc/bsan");
         Some(tarball.generate())
     }

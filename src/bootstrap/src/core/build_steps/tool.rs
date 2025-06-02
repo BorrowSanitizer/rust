@@ -1223,7 +1223,7 @@ tool_extended!(CargoBsan {
     stable: false,
     add_bins_to_sysroot: ["cargo-bsan"]
 });
-tool_extended!(Bsan {
+tool_extended!(BsanDriver {
     path: "src/tools/bsan/bsan-driver/",
     tool_name: "bsan-driver",
     stable: false,

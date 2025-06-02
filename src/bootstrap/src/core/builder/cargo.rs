@@ -261,7 +261,7 @@ impl Cargo {
                 // If we are linking against a prebuilt, external LLVM as a shared
                 // library, then we need to ensure that the path to libLLVM is added
                 // to rpath, otherwise it will not be available.
-                if builder.llvm_link_shared() && builder.is_system_llvm(target) {
+                if builder.llvm_link_shared() && builder.config.is_system_llvm(target) {
                     if let Some(llvm_config) = builder.llvm_config(target) {
                         let llvm_libdir = command(llvm_config)
                             .arg("--libdir")

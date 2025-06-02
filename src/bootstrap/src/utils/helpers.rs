@@ -89,10 +89,6 @@ pub fn split_debuginfo(name: impl Into<PathBuf>) -> Option<PathBuf> {
     pdb.exists().then_some(pdb)
 }
 
-pub fn dylib(name: &str, target: TargetSelection) -> String {
-    crate::utils::shared_helpers::dylib(name, &target.triple)
-}
-
 /// Returns `true` if the file name given looks like a dynamic library.
 pub fn is_dylib(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
