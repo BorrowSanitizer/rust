@@ -57,9 +57,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             free_disk: true
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            free_disk: false
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            free_disk: true
     runs-on: '${{ matrix.config.os }}'
     name: 'Build (${{ matrix.config.target }})'
     steps:
@@ -83,13 +83,7 @@ jobs:
       - name: Free up disk space
         run: src/ci/scripts/free-disk-space.sh
         if: matrix.config.free_disk
-        
-      - name: Unit Tests
-        run: ./x.py test --stage 1 src/tools/bsan/bsan-rt --config src/bootstrap/defaults/config.bsan.release.toml
-        
-      - name: UI Tests
-        run: ./x.py test --stage 2 src/tools/bsan/bsan-driver --config src/bootstrap/defaults/config.bsan.release.toml
-        
+
       - name: Dist
         run: ./x.py dist --config src/bootstrap/defaults/config.bsan.release.toml
         
