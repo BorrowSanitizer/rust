@@ -74,18 +74,17 @@ jobs:
         continue-on-error: true
         run: |
           git config --global --add safe.directory $GITHUB_WORKSPACE
-          src/ci/scripts/setup-upstream-remote.sh 
           echo "artifact=${{ env.prefix }}-${{ needs.init.outputs.release_name }}-${{ matrix.config.target }}" >> $GITHUB_OUTPUT
           
       - name: Install dependencies
-        run: rustup component add llvm-tools-preview
+        run: rustup component add llvm-tools
 
       - name: Free up disk space
         run: src/ci/scripts/free-disk-space.sh
         if: matrix.config.free_disk
 
       - name: Dist
-        run: ./x.py dist --config src/bootstrap/defaults/config.bsan.release.toml
+        run: ./x.py dist --config src/bootstrap/defaults/bootstrap.bsan.release.toml
         
       - name: Rename to target
         run: |

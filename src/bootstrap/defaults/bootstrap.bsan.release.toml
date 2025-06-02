@@ -1,6 +1,6 @@
 [build]
 build-stage = 2
-extended = true
+extended = false
 docs = false
 
 [llvm]
