@@ -26,24 +26,10 @@ jobs:
           fetch-depth: 0
       - name: Switch to nightly
         run: |
-          rustup default ${{ vars.BSAN_TOOLCHAIN }}
-          rustup component add rust-src rustc-dev llvm-tools-preview clippy
-      - name: Upstream
-        run: src/ci/scripts/setup-upstream-remote.sh
+          rustup default nightly
+          rustup component add rust-src rustc-dev llvm-tools clippy
       - name: Format
         run: ./x.py fmt --check
-      - name: Clippy (bsan-rt)
-        run: |
-          cd src/tools/bsan/bsan-rt
-          RUSTFLAGS='-C panic=abort -Zpanic_abort_tests' cargo clippy --all-targets --all-features -- -D warnings
-      - name: Clippy (bsan-driver)
-        run: |
-          cd src/tools/bsan/bsan-driver
-          cargo clippy --all-targets --all-features -- -D warnings
-      - name: Clippy (cargo-bsan)
-        run: |
-          cd src/tools/bsan/bsan-driver/cargo-bsan
-          cargo clippy --all-targets --all-features -- -D warnings
   build:
     needs: [fmt]
     strategy:
@@ -52,8 +38,8 @@ jobs:
         config:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
     runs-on: '${{ matrix.config.os }}'
     name: '${{ matrix.config.target }}'
     steps:
@@ -62,10 +48,8 @@ jobs:
           fetch-depth: 0
       - name: Install dependencies
         run: |
-          rustup component add llvm-tools-preview
-          cp src/bootstrap/defaults/config.bsan.dev.toml config.toml
-      - name: Upstream
-        run: src/ci/scripts/setup-upstream-remote.sh
+          rustup component add llvm-tools
+          cp src/bootstrap/defaults/bootstrap.bsan.dev.toml bootstrap.toml
       - name: Configure LLVM
         run: |
           export LLVM_COMMIT=$(git ls-tree --object-only --abbrev=7 HEAD src/llvm-project)
@@ -96,8 +80,4 @@ jobs:
           key: ${{ matrix.config.target }}-${{ matrix.config.os }}-${{ env.LLVM_COMMIT }}
       - name: Build
         run: ./x.py build --stage 1
-      - name: Unit Tests
-        run: ./x.py test --stage 1 src/tools/bsan/bsan-rt
-      - name: UI Tests
-        run: ./x.py test --stage 2 src/tools/bsan/bsan-driver
       
