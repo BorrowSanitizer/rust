@@ -85,18 +85,13 @@ jobs:
 
       - name: Dist
         run: ./x.py dist --config src/bootstrap/defaults/bootstrap.bsan.release.toml
-        
-      - name: Rename to target
-        run: |
-          mv ./build/dist/rust-${{ needs.init.outputs.rustc_version }}-dev-${{ matrix.config.target }}.tar.xz \
-            ./${{ steps.config.outputs.artifact }}.tar.xz 
 
       - name: Publish
         uses: actions/upload-artifact@v4
         with:
           compression-level: 0
           name: ${{ steps.config.outputs.artifact }}
-          path: ./${{ steps.config.outputs.artifact }}.tar.xz
+          path: ./build/dist/*-dev-${{ matrix.config.target }}.tar.xz
           
   release:
     name: Update rolling release

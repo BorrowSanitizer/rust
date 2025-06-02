@@ -53,4 +53,5 @@
 	shallow = true
 [submodule "src/tools/bsan"]
 	path = src/tools/bsan
-	url = https://github.com/BorrowSanitizer/bsan
+	url = https://github.com/BorrowSanitizer/bsan.git
+	shallow = true
