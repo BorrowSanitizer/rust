@@ -19,7 +19,6 @@ use object::read::archive::ArchiveFile;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
 
-use crate::core::build_steps::bsan::BsanRT;
 use crate::core::build_steps::doc::DocumentationFormat;
 use crate::core::build_steps::tool::{self, Tool};
 use crate::core::build_steps::vendor::{VENDOR_DIR, Vendor};
@@ -1335,7 +1334,6 @@ impl Step for Bsan {
         let compiler = self.compiler;
         let target = self.target;
 
-        let bsanrt = builder.ensure(BsanRT { compiler, target });
         let bsandriver =
             builder.ensure(tool::BsanDriver { compiler, target });
         let cargobsan =
@@ -1346,7 +1344,6 @@ impl Step for Bsan {
         tarball.is_preview(true);
         tarball.add_file(&bsandriver.tool_path, "bin", FileType::Executable);
         tarball.add_file(&cargobsan.tool_path, "bin", FileType::Executable);
-        tarball.add_file(bsanrt, "lib", FileType::NativeLibrary);
         tarball.add_legal_and_readme_to("share/doc/bsan");
         Some(tarball.generate())
     }

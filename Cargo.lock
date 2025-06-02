@@ -335,28 +335,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "bsan-driver"
+name = "bsan-shared"
 version = "0.1.0"
-dependencies = [
- "colored",
- "env_logger",
- "log",
- "regex",
- "rustc_version",
- "tempfile",
- "ui_test 0.26.5",
-]
-
-[[package]]
-name = "bsan-rt"
-version = "0.1.0"
-dependencies = [
- "cbindgen",
- "hashbrown",
- "libc",
- "rustc-hash 2.1.1",
- "smallvec",
-]
 
 [[package]]
 name = "bstr"
@@ -433,19 +413,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cargo-bsan"
-version = "0.1.0"
-dependencies = [
- "cargo_metadata 0.19.2",
- "directories",
- "env_logger",
- "log",
- "rustc-build-sysroot",
- "rustc_tools_util 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustc_version",
-]
-
-[[package]]
 name = "cargo-miri"
 version = "0.1.0"
 dependencies = [
@@ -498,25 +465,6 @@ dependencies = [
 [[package]]
 name = "cargotest2"
 version = "0.1.0"
-
-[[package]]
-name = "cbindgen"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eadd868a2ce9ca38de7eeafdcec9c7065ef89b42b32f0839278d55f35c54d1ff"
-dependencies = [
- "clap",
- "heck 0.4.1",
- "indexmap",
- "log",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.101",
- "tempfile",
- "toml 0.8.19",
-]
 
 [[package]]
 name = "cc"
@@ -661,7 +609,7 @@ dependencies = [
  "termize",
  "tokio",
  "toml 0.7.8",
- "ui_test 0.29.2",
+ "ui_test",
  "walkdir",
 ]
 
@@ -2423,7 +2371,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "tikv-jemalloc-sys",
- "ui_test 0.29.2",
+ "ui_test",
  "windows-sys 0.59.0",
 ]
 
@@ -5464,19 +5412,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "toml"
-version = "0.8.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1ed1f98e3fdc28d6d910e6737ae6ab1a93bf1985935a1193e68f93eeb68d24e"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_edit 0.22.26",
+ "toml_edit",
 ]
 
 [[package]]
@@ -5500,26 +5436,6 @@ dependencies = [
  "toml_datetime",
  "winnow 0.5.40",
 ]
-
-[[package]]
-name = "toml_edit"
-version = "0.22.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "310068873db2c5b3e7659d2cc35d21855dbafa50d1ce336397c666e3cb08137e"
-dependencies = [
- "indexmap",
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_write",
- "winnow 0.7.10",
-]
-
-[[package]]
-name = "toml_write"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfb942dfe1d8e29a7ee7fcbde5bd2b9a25fb89aa70caea2eba3bee836ff41076"
 
 [[package]]
 name = "tracing"
@@ -5646,32 +5562,6 @@ name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
-
-[[package]]
-name = "ui_test"
-version = "0.26.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32ee4c40e5a5f9fa6864ff976473e5d6a6e9884b6ce68b40690d9f87e1994c83"
-dependencies = [
- "annotate-snippets 0.11.5",
- "anyhow",
- "bstr",
- "cargo-platform",
- "cargo_metadata 0.18.1",
- "color-eyre",
- "colored",
- "comma",
- "crossbeam-channel",
- "indicatif",
- "levenshtein",
- "prettydiff",
- "regex",
- "rustc_version",
- "rustfix",
- "serde",
- "serde_json",
- "spanned",
-]
 
 [[package]]
 name = "ui_test"

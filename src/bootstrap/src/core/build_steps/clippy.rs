@@ -332,9 +332,8 @@ lint_any!(
     BuildHelper, "src/build_helper", "build_helper";
     BuildManifest, "src/tools/build-manifest", "build-manifest";
     CargoMiri, "src/tools/miri/cargo-miri", "cargo-miri";
-    CargoBsan, "src/tools/bsan/bsan-driver/cargo-bsan", "cargo-bsan";
-    BsanDriver, "src/tools/bsan/bsan-driver/", "bsan";
-    BsanRTCore, "src/tools/bsan/bsan-rt/", "bsan-rt";
+    CargoBsan, "src/tools/bsan/cargo-bsan/", "cargo-bsan";
+    BsanDriver, "src/tools/bsan/bsan-driver/", "bsan-driver";
     Clippy, "src/tools/clippy", "clippy";
     CollectLicenseMetadata, "src/tools/collect-license-metadata", "collect-license-metadata";
     CodegenGcc, "compiler/rustc_codegen_gcc", "rustc-codegen-gcc";

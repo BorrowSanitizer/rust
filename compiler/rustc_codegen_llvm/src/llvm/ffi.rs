@@ -238,7 +238,6 @@ pub(crate) enum AttributeKind {
     FnRetThunkExtern = 41,
     Writable = 42,
     DeadOnUnwind = 43,
-    SanitizeBorrow = 44,
 }
 
 /// LLVMIntPredicate

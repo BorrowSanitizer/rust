@@ -1218,7 +1218,7 @@ fn run_tool_build_step(
 }
 
 tool_extended!(CargoBsan {
-    path: "src/tools/bsan/bsan-driver/cargo-bsan",
+    path: "src/tools/bsan/cargo-bsan",
     tool_name: "cargo-bsan",
     stable: false,
     add_bins_to_sysroot: ["cargo-bsan"]

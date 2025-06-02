@@ -277,7 +277,6 @@ enum class LLVMRustAttributeKind {
   FnRetThunkExtern = 41,
   Writable = 42,
   DeadOnUnwind = 43,
-  SanitizeBorrow = 44
 };
 
 static Attribute::AttrKind fromRust(LLVMRustAttributeKind Kind) {
@@ -370,8 +369,6 @@ static Attribute::AttrKind fromRust(LLVMRustAttributeKind Kind) {
     return Attribute::Writable;
   case LLVMRustAttributeKind::DeadOnUnwind:
     return Attribute::DeadOnUnwind;
-  case LLVMRustAttributeKind::SanitizeBorrow:
-    return Attribute::SanitizeBorrow;
   }
   report_fatal_error("bad LLVMRustAttributeKind");
 }

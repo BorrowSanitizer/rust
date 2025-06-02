@@ -15,8 +15,7 @@ use tracing::instrument;
 
 pub use self::cargo::{Cargo, cargo_profile_var};
 pub use crate::Compiler;
-use crate::core::build_steps::{
-    bsan, check, clean, clippy, compile, dist, doc, gcc, install, llvm, run, setup, test, tool,
+use crate::core::build_steps::{check, clean, clippy, compile, dist, doc, gcc, install, llvm, run, setup, test, tool,
     vendor,
 };
 use crate::core::config::flags::Subcommand;
@@ -907,9 +906,6 @@ impl<'a> Builder<'a> {
                 llvm::Llvm,
                 gcc::Gcc,
                 llvm::Sanitizers,
-                bsan::BsanRT,
-                tool::CargoBsan,
-                tool::BsanDriver,
                 tool::Rustfmt,
                 tool::Cargofmt,
                 tool::Miri,
@@ -929,7 +925,6 @@ impl<'a> Builder<'a> {
                 clippy::Bootstrap,
                 clippy::BuildHelper,
                 clippy::BuildManifest,
-                clippy::BsanRTCore,
                 clippy::CargoBsan,
                 clippy::BsanDriver,
                 clippy::CargoMiri,
@@ -1014,7 +1009,6 @@ impl<'a> Builder<'a> {
                 test::EmbeddedBook,
                 test::EditionGuide,
                 test::Rustfmt,
-                test::BsanRTCore,
                 test::BsanDriver,
                 test::Miri,
                 test::CargoMiri,

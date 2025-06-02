@@ -1923,6 +1923,8 @@ pub mod parse {
         };
 
         *slot = Some(align);
+
+        return true;
     }
 
 }
