@@ -68,11 +68,12 @@ jobs:
         with:
           repository: BorrowSanitizer/rust
           fetch-depth: 0
-      
+
       - name: Configure
         id: config
         continue-on-error: true
         run: |
+          git submodule update --init src/tools/bsan
           git config --global --add safe.directory $GITHUB_WORKSPACE
           echo "artifact=${{ env.prefix }}-${{ needs.init.outputs.release_name }}-${{ matrix.config.target }}" >> $GITHUB_OUTPUT
           

@@ -48,6 +48,7 @@ jobs:
           fetch-depth: 0
       - name: Install dependencies
         run: |
+          git submodule update --init src/tools/bsan
           rustup component add llvm-tools
           cp src/bootstrap/defaults/bootstrap.bsan.dev.toml bootstrap.toml
       - name: Configure LLVM
