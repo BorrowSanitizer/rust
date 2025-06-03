@@ -1,6 +1,12 @@
 [build]
 build-stage = 2
-extended = false
+extended = true
+tools = [
+    "src",
+    "clippy",
+    "rustdoc",
+    "rustfmt",
+]
 docs = false
 
 [llvm]
@@ -10,7 +16,7 @@ targets = "AArch64;ARM;X86"
 [rust]
 channel = "dev"
 download-rustc = false
-
+llvm-tools = true
 lld = true
 llvm-bitcode-linker = true
 
