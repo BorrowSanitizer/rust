@@ -157,9 +157,3 @@ jobs:
             -X PATCH \
             "/repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }}" \
             -F "draft=false"
-
-      - name: Trigger image workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run image --repo ${{ github.repository }}
