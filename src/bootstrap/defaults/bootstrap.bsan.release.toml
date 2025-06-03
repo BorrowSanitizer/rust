@@ -1,3 +1,5 @@
+change-id = 140732
+
 [build]
 build-stage = 2
 extended = true
@@ -12,6 +14,7 @@ docs = false
 [llvm]
 download-ci-llvm = false
 targets = "AArch64;ARM;X86"
+link-shared = true
 
 [rust]
 channel = "dev"

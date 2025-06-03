@@ -76,7 +76,7 @@ jobs:
           git submodule update --init src/tools/bsan
           git config --global --add safe.directory $GITHUB_WORKSPACE
           echo "artifact=${{ env.prefix }}-${{ needs.init.outputs.release_name }}-${{ matrix.config.target }}" >> $GITHUB_OUTPUT
-          
+          echo "tarball_suffix=${{ needs.init.outputs.rustc_version }}-dev-${{ matrix.config.target }}.tar.xz" >> $GITHUB_OUTPUT
       - name: Install dependencies
         run: rustup component add llvm-tools
 
@@ -92,8 +92,11 @@ jobs:
         with:
           compression-level: 0
           name: ${{ steps.config.outputs.artifact }}
-          path: ./build/dist/*-dev-${{ matrix.config.target }}.tar.xz
-          
+          path: |
+            ./build/dist/rustc-dev-${{ steps.config.outputs.tarball_suffix }}
+            ./build/dist/rust-dev-${{ steps.config.outputs.tarball_suffix }}
+            ./build/dist/rust-${{ steps.config.outputs.tarball_suffix }}
+  
   release:
     name: Update rolling release
     needs: [init, build]
