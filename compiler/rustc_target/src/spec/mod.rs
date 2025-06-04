@@ -1456,7 +1456,6 @@ bitflags::bitflags! {
         const KERNELADDRESS = 1 << 9;
         const SAFESTACK = 1 << 10;
         const DATAFLOW = 1 << 11;
-        const BORROW = 1 << 12;
     }
 }
 rustc_data_structures::external_bitflags_debug! { SanitizerSet }
@@ -1471,13 +1470,6 @@ impl SanitizerSet {
         (SanitizerSet::ADDRESS, SanitizerSet::MEMTAG),
         (SanitizerSet::ADDRESS, SanitizerSet::KERNELADDRESS),
         (SanitizerSet::ADDRESS, SanitizerSet::SAFESTACK),
-        (SanitizerSet::BORROW, SanitizerSet::ADDRESS),
-        (SanitizerSet::BORROW, SanitizerSet::MEMORY),
-        (SanitizerSet::BORROW, SanitizerSet::THREAD),
-        (SanitizerSet::BORROW, SanitizerSet::HWADDRESS),
-        (SanitizerSet::BORROW, SanitizerSet::MEMTAG),
-        (SanitizerSet::BORROW, SanitizerSet::KERNELADDRESS),
-        (SanitizerSet::BORROW, SanitizerSet::SAFESTACK),
         (SanitizerSet::LEAK, SanitizerSet::MEMORY),
         (SanitizerSet::LEAK, SanitizerSet::THREAD),
         (SanitizerSet::LEAK, SanitizerSet::KERNELADDRESS),
@@ -1514,7 +1506,6 @@ impl SanitizerSet {
             SanitizerSet::SHADOWCALLSTACK => "shadow-call-stack",
             SanitizerSet::THREAD => "thread",
             SanitizerSet::HWADDRESS => "hwaddress",
-            SanitizerSet::BORROW => "borrow",
             _ => return None,
         })
     }

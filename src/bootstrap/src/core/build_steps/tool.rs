@@ -1266,7 +1266,6 @@ tool_extended!(Rustfmt {
     add_bins_to_sysroot: ["rustfmt"]
 });
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TestFloatParse {
     pub host: TargetSelection,

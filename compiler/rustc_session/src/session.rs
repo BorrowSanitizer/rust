@@ -370,10 +370,6 @@ impl Session {
     pub fn coverage_discard_all_spans_in_codegen(&self) -> bool {
         self.opts.unstable_opts.coverage_options.discard_all_spans_in_codegen
     }
-    
-    pub fn is_sanitizer_borrow_enabled(&self) -> bool {
-        self.opts.unstable_opts.sanitizer.contains(SanitizerSet::BORROW)
-    }
 
     pub fn is_sanitizer_cfi_enabled(&self) -> bool {
         self.opts.unstable_opts.sanitizer.contains(SanitizerSet::CFI)
@@ -583,12 +579,11 @@ impl Session {
         // MemorySanitizer uses lifetimes to detect use of uninitialized stack variables.
         // HWAddressSanitizer will use lifetimes to detect use after scope bugs in the future.
         // BorrowSanitizer will eventually use lifetimes as well.
-        || self.opts.unstable_opts.sanitizer.intersects(SanitizerSet::ADDRESS | SanitizerSet::BORROW | SanitizerSet::KERNELADDRESS | SanitizerSet::MEMORY | SanitizerSet::HWADDRESS)
+        || self.opts.unstable_opts.sanitizer.intersects(SanitizerSet::ADDRESS | SanitizerSet::KERNELADDRESS | SanitizerSet::MEMORY | SanitizerSet::HWADDRESS)
     }
 
     pub fn emit_retags(&self) -> bool {
-        self.opts.unstable_opts.mir_emit_retag
-            || self.opts.unstable_opts.sanitizer.intersects(SanitizerSet::BORROW)
+        self.opts.unstable_opts.mir_emit_retag || self.opts.unstable_opts.llvm_emit_retag
     }
 
     pub fn diagnostic_width(&self) -> usize {
@@ -725,7 +720,7 @@ impl Session {
                 || self.opts.output_types.contains_key(&OutputType::Bitcode)
                 // AddressSanitizer and MemorySanitizer use alloca name when reporting an issue.
                 // BorrowSanitizer should also have this information.
-                || self.opts.unstable_opts.sanitizer.intersects(SanitizerSet::ADDRESS | SanitizerSet::BORROW | SanitizerSet::MEMORY);
+                || self.opts.unstable_opts.sanitizer.intersects(SanitizerSet::ADDRESS | SanitizerSet::MEMORY);
             !more_names
         }
     }

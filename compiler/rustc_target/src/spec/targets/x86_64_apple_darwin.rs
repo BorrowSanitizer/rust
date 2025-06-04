@@ -20,7 +20,6 @@ pub(crate) fn target() -> Target {
             max_atomic_width: Some(128), // penryn+ supports cmpxchg16b
             frame_pointer: FramePointer::Always,
             supported_sanitizers: SanitizerSet::ADDRESS
-                | SanitizerSet::BORROW
                 | SanitizerSet::CFI
                 | SanitizerSet::LEAK
                 | SanitizerSet::THREAD,

@@ -24,7 +24,6 @@ pub(crate) fn target() -> Target {
             max_atomic_width: Some(128),
             stack_probes: StackProbeType::Inline,
             supported_sanitizers: SanitizerSet::ADDRESS
-                | SanitizerSet::BORROW
                 | SanitizerSet::CFI
                 | SanitizerSet::KCFI
                 | SanitizerSet::LEAK

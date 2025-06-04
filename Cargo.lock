@@ -3464,6 +3464,7 @@ name = "rustc_codegen_llvm"
 version = "0.0.0"
 dependencies = [
  "bitflags",
+ "bsan-shared",
  "gimli",
  "itertools",
  "libc",
@@ -3504,6 +3505,7 @@ dependencies = [
  "ar_archive_writer",
  "arrayvec",
  "bitflags",
+ "bsan-shared",
  "bstr",
  "cc",
  "either",

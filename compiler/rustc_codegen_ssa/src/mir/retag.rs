@@ -1,0 +1,416 @@
+use std::marker::PhantomData;
+
+use bsan_shared::{Permission, ProtectorKind, RetagInfo};
+use rustc_abi::{BackendRepr, FieldIdx, FieldsShape, VariantIdx, Variants};
+use rustc_middle::mir::{Place, RetagKind};
+use rustc_middle::ty::layout::{HasTyCtxt, TyAndLayout};
+use rustc_middle::ty::{self, Mutability};
+use rustc_session::config::LLVMRetagFields;
+use tracing::trace;
+
+use super::operand::OperandValue;
+use super::place::PlaceValue;
+use super::{BuilderMethods, FunctionCx, LocalRef};
+use crate::common::IntPredicate;
+use crate::mir::place::PlaceRef;
+use crate::traits::{ConstCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods};
+
+// When we retag a Place, we need to traverse through all of its fields
+// and/or variants and emit retags for all of the sub-places that contain references,
+// Boxes, and other types that require retagging. Calculating a sub-place requires cg-ing pointer offsets
+// from the initial place and branching on variants. Not all sub-places need to be retagged, so we cannot
+// compute them eagerly. Instead, when traversing a place, we store unevaluated subplaces as "modifiers"
+// from an initial place. Once we find a subplace that needs to be retagged, we apply all current modifiers
+// to the "base" place that we started with. We store the intermediate results from calculating all subplaces
+// along the "path" to the subplace we're visiting, so that when we traverse back up the path, we don't need to
+// repeat work. For example, if a variant of an enum contains N sub-places that need retagging,
+// then we only want to have to branch that variant once, instead of N times for each sub-place.
+
+/// Either a variant or a field.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum Modifier {
+    Variant(VariantIdx),
+    Field(FieldIdx),
+}
+
+impl Modifier {
+    fn apply_to<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+        self,
+        fx: &mut FunctionCx<'a, 'tcx, Bx>,
+        bx: &mut Bx,
+        place: &PlaceRef<'tcx, Bx::Value>,
+    ) -> (PlaceRef<'tcx, Bx::Value>, Option<(Bx::BasicBlock, Bx::BasicBlock)>) {
+        match self {
+            Modifier::Variant(idx) => {
+                let cx = bx.cx();
+                let discrminant_ty = place.layout.ty.discriminant_ty(cx.tcx());
+                let discrminant_for_variant = place
+                    .layout
+                    .ty
+                    .discriminant_for_variant(cx.tcx(), idx)
+                    .expect("Invalid variant.");
+
+                let discriminant_backend_ty =
+                    bx.immediate_backend_type(bx.layout_of(discrminant_ty));
+                let discriminant_for_variant =
+                    bx.const_uint_big(discriminant_backend_ty, discrminant_for_variant.val);
+
+                let operand = bx.load_operand(*place);
+
+                let discriminant_actual = operand.codegen_get_discr(fx, bx, discrminant_ty);
+
+                let is_variant = bx.append_sibling_block("variant");
+
+                let is_not_variant = bx.append_sibling_block("cont");
+
+                let cond =
+                    bx.icmp(IntPredicate::IntEQ, discriminant_for_variant, discriminant_actual);
+
+                bx.cond_br(cond, is_variant, is_not_variant);
+
+                bx.switch_to_block(is_variant);
+                (place.project_downcast(bx, idx), Some((is_variant, is_not_variant)))
+            }
+            Modifier::Field(field_idx) => (place.project_field(bx, field_idx.as_usize()), None),
+        }
+    }
+}
+struct RetagCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
+    kind: RetagKind,
+    places: Vec<PlaceRef<'tcx, Bx::Value>>,
+    modifiers: Vec<Modifier>,
+    branches: Vec<Bx::BasicBlock>,
+    data: PhantomData<&'a ()>,
+}
+
+impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
+    fn visit(
+        fx: &mut FunctionCx<'a, 'tcx, Bx>,
+        bx: &mut Bx,
+        base: PlaceRef<'tcx, Bx::Value>,
+        kind: RetagKind,
+    ) {
+        let mut visitor = Self {
+            kind,
+            places: vec![base],
+            modifiers: vec![],
+            branches: vec![],
+            data: PhantomData::default(),
+        };
+        visitor.visit_value(fx, bx, base.layout);
+    }
+
+    /// Applies each of the current modifiers to the base PlaceRef, cg-ing along the way.
+    #[allow(dead_code)]
+    fn crystallize(
+        &mut self,
+        fx: &mut FunctionCx<'a, 'tcx, Bx>,
+        bx: &mut Bx,
+    ) -> PlaceRef<'tcx, Bx::Value> {
+        let mut curr_subplace = *self.places.last().unwrap();
+
+        let modifiers: Vec<Modifier> = self.modifiers.drain(..).collect();
+
+        for modifier in modifiers {
+            let (subplace, branch) = modifier.apply_to(fx, bx, &curr_subplace);
+            if let Some((then, otherwise)) = branch {
+                bx.switch_to_block(then);
+                self.branches.push(otherwise)
+            }
+            curr_subplace = subplace;
+            self.places.push(curr_subplace);
+        }
+
+        return curr_subplace;
+    }
+
+    // Recursive actions, ready to be overloaded.
+    /// Visits the given value, dispatching as appropriate to more specialized visitors.
+    #[inline(always)]
+    fn visit_value(
+        &mut self,
+        fx: &mut FunctionCx<'a, 'tcx, Bx>,
+        bx: &mut Bx,
+        layout: TyAndLayout<'tcx>,
+    ) {
+        // If this place is smaller than a pointer, we know that it can't contain any
+        // pointers we need to retag, so we can stop recursion early.
+        // This optimization is crucial for ZSTs, because they can contain way more fields
+        // than we can ever visit.
+        if layout.is_sized() && layout.size < bx.tcx().data_layout.pointer_size {
+            return;
+        }
+
+        // Check the type of this value to see what to do with it (retag, or recurse).
+        match layout.ty.kind() {
+            // If it is a trait object, switch to the real type that was used to create it.
+            ty::Dynamic(_data, _, ty::Dyn) => {}
+            ty::Dynamic(_data, _, ty::DynStar) => {}
+            &ty::Ref(_, _, mutability) => {
+                let place = self.crystallize(fx, bx);
+                self.retag_ref_ty(bx, place, mutability);
+            }
+
+            ty::RawPtr(_, _) => {
+                // We definitely do *not* want to recurse into raw pointers -- wide raw
+                // pointers have fields, and for dyn Trait pointees those can have reference
+                // type!
+                // We also do not want to reborrow them.
+            }
+            ty::Adt(adt, _) if adt.is_box() => {
+                // Recurse for boxes, they require some tricky handling and will end up in `visit_box` above.
+                // (Yes this means we technically also recursively retag the allocator itself
+                // even if field retagging is not enabled. *shrug*)
+                self.walk_value(fx, bx, layout);
+            }
+            _ => {
+                // Not a reference/pointer/box. Only recurse if configured appropriately.
+                let recurse = match bx.cx().sess().opts.unstable_opts.llvm_retag_fields {
+                    LLVMRetagFields::None => false,
+                    LLVMRetagFields::All => true,
+                    LLVMRetagFields::Scalar => {
+                        // Matching `ArgAbi::new` at the time of writing, only fields of
+                        // `Scalar` and `ScalarPair` ABI are considered.
+                        matches!(
+                            layout.backend_repr,
+                            BackendRepr::Scalar(..) | BackendRepr::ScalarPair(..)
+                        )
+                    }
+                };
+                if recurse {
+                    self.walk_value(fx, bx, layout)
+                }
+            }
+        }
+    }
+
+    /// Called each time we recurse down to a field of a "product-like" aggregate
+    /// (structs, tuples, arrays and the like, but not enums), passing in old (outer)
+    /// and new (inner) value.
+    /// This gives the visitor the chance to track the stack of nested fields that
+    /// we are descending through.
+    #[inline(always)]
+    fn visit_field(
+        &mut self,
+        fx: &mut FunctionCx<'a, 'tcx, Bx>,
+        bx: &mut Bx,
+        layout: TyAndLayout<'tcx>,
+        idx: FieldIdx,
+    ) {
+        self.modifiers.push(Modifier::Field(idx));
+        self.visit_value(fx, bx, layout.field(bx.cx(), idx.as_usize()));
+        if self.modifiers.is_empty() {
+            self.places.pop().expect("A place should have been evaluated.");
+        } else {
+            self.modifiers.pop().expect("An unevaluated modifier should be present.");
+        }
+    }
+    /// Called when recursing into an enum variant.
+    /// This gives the visitor the chance to track the stack of nested fields that
+    /// we are descending through.
+    #[inline(always)]
+    fn visit_variant(
+        &mut self,
+        fx: &mut FunctionCx<'a, 'tcx, Bx>,
+        bx: &mut Bx,
+        layout: TyAndLayout<'tcx>,
+        vidx: VariantIdx,
+    ) {
+        self.modifiers.push(Modifier::Variant(vidx));
+        self.visit_value(fx, bx, layout.for_variant(bx.cx(), vidx));
+        if self.modifiers.is_empty() {
+            self.places.pop().expect("A place should have been resolved.");
+            let otherwise = self.branches.pop().expect("A conditional should have been inserted.");
+            bx.br(otherwise);
+            bx.switch_to_block(otherwise);
+        } else {
+            self.modifiers.pop();
+        }
+    }
+
+    fn inner_ptr_of_unique(
+        &mut self,
+        bx: &mut Bx,
+        unique_ptr: PlaceRef<'tcx, Bx::Value>,
+    ) -> PlaceRef<'tcx, Bx::Value> {
+        // Unfortunately there is some type junk in the way here: `unique_ptr` is a `Unique`...
+        // (which means another 2 fields, the second of which is a `PhantomData`)
+        assert_eq!(unique_ptr.layout.fields.count(), 2);
+        let phantom = unique_ptr.layout.field(bx.cx(), 1);
+        assert!(
+            phantom.ty.ty_adt_def().is_some_and(|adt| adt.is_phantom_data()),
+            "2nd field of `Unique` should be PhantomData but is {:?}",
+            phantom.ty,
+        );
+        let nonnull_ptr = unique_ptr.project_field(bx, 0);
+        // ... that contains a `NonNull`... (gladly, only a single field here)
+        assert_eq!(nonnull_ptr.layout.fields.count(), 1);
+        // ... whose only field finally is a raw ptr
+        nonnull_ptr.project_field(bx, 0)
+    }
+
+    fn retag_ref_ty(
+        &mut self,
+        bx: &mut Bx,
+        pointee: PlaceRef<'tcx, Bx::Value>,
+        mutability: Mutability,
+    ) {
+        let ty_is_freeze = pointee.layout.ty.is_freeze(bx.tcx(), bx.typing_env());
+        let ty_is_unpin = pointee.layout.ty.is_unpin(bx.tcx(), bx.typing_env());
+        let is_protected = self.kind == RetagKind::FnEntry;
+
+        let perm_kind = match mutability {
+            Mutability::Not if ty_is_unpin => Permission::new_reserved(ty_is_freeze, is_protected),
+            Mutability::Mut if ty_is_freeze => Permission::new_frozen(),
+            // Raw pointers never enter this function so they are not handled.
+            // However raw pointers are not the only pointers that take the parent
+            // tag, this also happens for `!Unpin` `&mut`s and interior mutable
+            // `&`s, which are excluded above.
+            _ => return,
+        };
+
+        let size = pointee.layout.size.bytes_usize();
+
+        let protector_kind =
+            if is_protected { ProtectorKind::StrongProtector } else { ProtectorKind::NoProtector };
+        let perm = RetagInfo::new(size, perm_kind, protector_kind);
+        bx.retag(pointee.val, perm);
+    }
+
+    /// Compute permission for `Box`-like type (`Box` always, and also `Unique` if enabled).
+    /// These pointers allow deallocation so need a different kind of protector not handled
+    /// by `from_ref_ty`.
+    fn retag_unique_ty(&mut self, bx: &mut Bx, place: PlaceRef<'tcx, Bx::Value>) {
+        let ty = place.layout.ty;
+        let ty_is_unpin = ty.is_unpin(bx.tcx(), bx.typing_env());
+        if ty_is_unpin {
+            let ty_is_freeze = ty.is_freeze(bx.tcx(), bx.typing_env());
+            let is_protected = self.kind == RetagKind::FnEntry;
+            let size = place.layout.size.bytes_usize();
+            let protector_kind: ProtectorKind = if is_protected {
+                ProtectorKind::WeakProtector
+            } else {
+                ProtectorKind::NoProtector
+            };
+
+            let perm_kind = Permission::new_reserved(ty_is_freeze, is_protected);
+            let perm = RetagInfo::new(size, perm_kind, protector_kind);
+            bx.retag(place.val, perm);
+            todo!()
+        }
+    }
+
+    /// Traversal logic; should not be overloaded.
+    fn walk_value(
+        &mut self,
+        fx: &mut FunctionCx<'a, 'tcx, Bx>,
+        bx: &mut Bx,
+        layout: TyAndLayout<'tcx>,
+    ) {
+        let ty = layout.ty;
+
+        trace!("walk_value: type: {ty}");
+
+        // Special treatment for special types, where the (static) layout is not sufficient.
+        match *ty.kind() {
+            // If it is a trait object, switch to the real type that was used to create it.
+            // ty placement with length 0, so we enter the `Array` case below which
+            // indirectly uses the metadata to determine the actual length.
+
+            // However, `Box`... let's talk about `Box`.
+            ty::Adt(def, ..) if def.is_box() => {
+                // `Box` has two fields: the pointer we care about, and the allocator.
+                assert_eq!(layout.fields.count(), 2, "`Box` must have exactly 2 fields");
+
+                if ty.is_box_global(bx.tcx()) {
+                    let current_place = self.crystallize(fx, bx);
+                    let unique_ptr = current_place.project_field(bx, 0);
+                    let inner_ptr = self.inner_ptr_of_unique(bx, unique_ptr);
+                    self.retag_unique_ty(bx, inner_ptr);
+                }
+
+                // The second `Box` field is the allocator, which we recursively check for validity
+                // like in regular structs.
+                self.visit_field(fx, bx, layout, FieldIdx::from_usize(1));
+            }
+
+            // Non-normalized types should never show up here.
+            ty::Param(..)
+            | ty::Alias(..)
+            | ty::Bound(..)
+            | ty::Placeholder(..)
+            | ty::Infer(..)
+            | ty::Error(..) => {}
+
+            // The rest is handled below.
+            _ => {}
+        };
+
+        // Visit the fields of this value.
+        match &layout.fields {
+            FieldsShape::Primitive => {}
+            FieldsShape::Arbitrary { memory_index, .. } => {
+                for idx in memory_index.indices() {
+                    self.visit_field(fx, bx, layout, idx);
+                }
+            }
+            FieldsShape::Array { .. } => {
+                for idx in layout.fields.index_by_increasing_offset() {
+                    self.visit_field(fx, bx, layout, FieldIdx::from_usize(idx));
+                }
+            }
+            _ => {}
+        }
+
+        match &layout.variants {
+            Variants::Multiple { tag_field, variants, .. } => {
+                self.modifiers.push(Modifier::Field(FieldIdx::from_usize(*tag_field)));
+                for vidx in variants.indices().into_iter() {
+                    self.visit_variant(fx, bx, layout, vidx);
+                }
+            }
+            Variants::Single { .. } => {}
+            Variants::Empty => {}
+        }
+    }
+}
+
+impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
+    pub(crate) fn codegen_retag(&mut self, bx: &mut Bx, place: &Place<'tcx>, kind: RetagKind) {
+        self.resolve_place(bx, place).map(|place| RetagCx::visit(self, bx, place, kind));
+    }
+
+    fn resolve_place(
+        &mut self,
+        bx: &mut Bx,
+        place: &Place<'tcx>,
+    ) -> Option<PlaceRef<'tcx, Bx::Value>> {
+        if let Some(index) = place.as_local() {
+            match self.locals[index] {
+                LocalRef::Place(cg_dest) => Some(cg_dest),
+                LocalRef::UnsizedPlace(cg_indirect_dest) => Some(cg_indirect_dest),
+                LocalRef::PendingOperand => None,
+                LocalRef::Operand(op) => {
+                    let mono_ty = self.monomorphized_place_ty(place.as_ref());
+                    if mono_ty.is_any_ptr() {
+                        let place_val = match op.val {
+                            OperandValue::Ref(r) => Some(r),
+                            OperandValue::Immediate(llval) => {
+                                Some(PlaceValue::new_sized(llval, op.layout.align.abi))
+                            }
+                            OperandValue::Pair(llptr, _) => {
+                                Some(PlaceValue::new_sized(llptr, op.layout.align.abi).into())
+                            }
+                            OperandValue::ZeroSized => None,
+                        };
+                        place_val.map(|place_val| PlaceRef::new_sized(place_val.llval, op.layout))
+                    } else {
+                        None
+                    }
+                }
+            }
+        } else {
+            Some(self.codegen_place(bx, place.as_ref()))
+        }
+    }
+}

@@ -810,6 +810,8 @@ fn test_unstable_options_tracking_hash() {
     tracked!(link_directives, false);
     tracked!(link_only, true);
     tracked!(lint_llvm_ir, true);
+    tracked!(llvm_emit_retag, true);
+    tracked!(llvm_retag_fields, LLVMRetagFields::default());
     tracked!(llvm_module_flag, vec![("bar".to_string(), 123, "max".to_string())]);
     tracked!(llvm_plugins, vec![String::from("plugin_name")]);
     tracked!(location_detail, LocationDetail { file: true, line: false, column: false });

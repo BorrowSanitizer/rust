@@ -121,7 +121,7 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
 
         // PART 3
         // Add retag after assignments.
-        let is_bsan = tcx.sess.is_sanitizer_borrow_enabled();
+        let is_bsan = tcx.sess.opts.unstable_opts.llvm_emit_retag;
         for block_data in basic_blocks {
             // We want to insert statements as we iterate. To this end, we
             // iterate backwards using indices.

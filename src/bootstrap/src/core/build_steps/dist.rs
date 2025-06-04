@@ -1334,10 +1334,8 @@ impl Step for Bsan {
         let compiler = self.compiler;
         let target = self.target;
 
-        let bsandriver =
-            builder.ensure(tool::BsanDriver { compiler, target });
-        let cargobsan =
-            builder.ensure(tool::CargoBsan { compiler, target });
+        let bsandriver = builder.ensure(tool::BsanDriver { compiler, target });
+        let cargobsan = builder.ensure(tool::CargoBsan { compiler, target });
 
         let mut tarball = Tarball::new(builder, "bsan", &target.triple);
         tarball.set_overlay(OverlayKind::Bsan);

@@ -644,7 +644,6 @@ pub(crate) unsafe fn llvm_optimize(
             sanitize_kernel_address_recover: config
                 .sanitizer_recover
                 .contains(SanitizerSet::KERNELADDRESS),
-            sanitize_borrow: config.sanitizer.contains(SanitizerSet::BORROW),
         })
     } else {
         None

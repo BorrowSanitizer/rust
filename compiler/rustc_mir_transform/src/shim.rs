@@ -301,7 +301,7 @@ fn dropee_emit_retag<'tcx>(
     mut dropee_ptr: Place<'tcx>,
     span: Span,
 ) -> Place<'tcx> {
-    if tcx.sess.opts.unstable_opts.mir_emit_retag {
+    if tcx.sess.emit_retags() {
         let source_info = SourceInfo::outermost(span);
         // We want to treat the function argument as if it was passed by `&mut`. As such, we
         // generate

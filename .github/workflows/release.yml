@@ -95,6 +95,7 @@ jobs:
           path: |
             ./build/dist/rustc-dev-${{ steps.config.outputs.tarball_suffix }}
             ./build/dist/rust-dev-${{ steps.config.outputs.tarball_suffix }}
+            ./build/dist/rust-src-${{ steps.config.outputs.tarball_suffix }}
             ./build/dist/rust-${{ steps.config.outputs.tarball_suffix }}
   
   release:

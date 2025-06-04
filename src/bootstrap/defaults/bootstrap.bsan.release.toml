@@ -14,6 +14,7 @@ docs = false
 [llvm]
 download-ci-llvm = false
 targets = "AArch64;ARM;X86"
+link-shared = true
 
 [rust]
 channel = "dev"
@@ -21,6 +22,7 @@ download-rustc = false
 llvm-tools = true
 lld = true
 llvm-bitcode-linker = true
+
 
 [dist]
 compression-profile = "balanced"

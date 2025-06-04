@@ -10,8 +10,8 @@ use std::{env, fs, iter};
 
 use clap_complete::shells;
 
-use crate::core::build_steps::compile::run_cargo;
 use crate::core::build_steps::bsan::BsanRT;
+use crate::core::build_steps::compile::run_cargo;
 use crate::core::build_steps::doc::DocumentationFormat;
 use crate::core::build_steps::gcc::{Gcc, add_cg_gcc_cargo_flags};
 use crate::core::build_steps::llvm::get_llvm_version;
@@ -596,16 +596,11 @@ impl Step for BsanDriver {
         builder.ensure(BsanRT { compiler: host_compiler, target: host });
 
         // Build our tools.
-        let bsan_driver = builder.ensure(tool::BsanDriver {
-            compiler: host_compiler,
-            target: host,
-        });
+        let bsan_driver =
+            builder.ensure(tool::BsanDriver { compiler: host_compiler, target: host });
 
         // the ui tests also assume cargo-bsan has been built
-        builder.ensure(tool::CargoBsan {
-            compiler: host_compiler,
-            target: host,
-        });
+        builder.ensure(tool::CargoBsan { compiler: host_compiler, target: host });
 
         // We also need sysroots, for BSAN and for the host (the latter for build scripts).
         // This is for the tests so everything is done with the target compiler.

@@ -322,7 +322,7 @@ impl<'a, 'tcx> Visitor<'tcx> for CfgChecker<'a, 'tcx> {
                 // DropsLowered`. However, this causes ICEs with generation of drop shims, which
                 // seem to fail to set their `MirPhase` correctly.
                 if matches!(kind, RetagKind::TwoPhase)
-                    && !self.tcx.sess.is_sanitizer_borrow_enabled()
+                    && !self.tcx.sess.opts.unstable_opts.llvm_emit_retag
                 {
                     self.fail(location, format!("explicit `{kind:?}` is forbidden"));
                 }
@@ -1532,7 +1532,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                 // DropsLowered`. However, this causes ICEs with generation of drop shims, which
                 // seem to fail to set their `MirPhase` correctly.
                 if matches!(kind, RetagKind::TwoPhase)
-                    && !self.tcx.sess.is_sanitizer_borrow_enabled()
+                    && !self.tcx.sess.opts.unstable_opts.llvm_emit_retag
                 {
                     self.fail(location, format!("explicit `{kind:?}` is forbidden"));
                 }

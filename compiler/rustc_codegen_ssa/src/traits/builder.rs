@@ -1,9 +1,9 @@
 use std::assert_matches::assert_matches;
 use std::ops::Deref;
 
+use bsan_shared::RetagInfo;
 use rustc_abi::{Align, Scalar, Size, WrappingRange};
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
-use rustc_middle::mir::{PlaceKind, RetagKind};
 use rustc_middle::ty::layout::{FnAbiOf, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{AtomicOrdering, Instance, Ty};
 use rustc_session::config::OptLevel;
@@ -435,12 +435,7 @@ pub trait BuilderMethods<'a, 'tcx>:
         flags: MemFlags,
     );
 
-    fn retag(
-        &mut self,
-        place: PlaceValue<Self::Value>,
-        place_kind: PlaceKind,
-        retag_kind: RetagKind,
-    );
+    fn retag(&mut self, place: PlaceValue<Self::Value>, info: RetagInfo);
 
     /// *Typed* copy for non-overlapping places.
     ///

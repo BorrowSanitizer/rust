@@ -15,8 +15,8 @@ use tracing::instrument;
 
 pub use self::cargo::{Cargo, cargo_profile_var};
 pub use crate::Compiler;
-use crate::core::build_steps::{check, clean, clippy, compile, dist, doc, gcc, install, llvm, run, setup, test, tool,
-    vendor,
+use crate::core::build_steps::{
+    check, clean, clippy, compile, dist, doc, gcc, install, llvm, run, setup, test, tool, vendor,
 };
 use crate::core::config::flags::Subcommand;
 use crate::core::config::{DryRun, TargetSelection};
@@ -1455,14 +1455,10 @@ impl<'a> Builder<'a> {
         let build_compiler = self.compiler(run_compiler.stage - 1, self.build.build);
 
         // Prepare the tools
-        let bsan = self.ensure(tool::BsanDriver {
-            compiler: build_compiler,
-            target: self.build.build,
-        });
-        let cargo_bsan = self.ensure(tool::CargoBsan {
-            compiler: build_compiler,
-            target: self.build.build,
-        });
+        let bsan =
+            self.ensure(tool::BsanDriver { compiler: build_compiler, target: self.build.build });
+        let cargo_bsan =
+            self.ensure(tool::CargoBsan { compiler: build_compiler, target: self.build.build });
         // Invoke cargo-miri, make sure it can find miri and cargo.
         let mut cmd = command(cargo_bsan.tool_path);
         cmd.env("BSAN", &bsan.tool_path);

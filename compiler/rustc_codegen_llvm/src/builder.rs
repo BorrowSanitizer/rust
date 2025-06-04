@@ -4,6 +4,7 @@ use std::{iter, ptr};
 
 pub(crate) mod autodiff;
 
+use bsan_shared::RetagInfo;
 use libc::{c_char, c_uint, size_t};
 use rustc_abi as abi;
 use rustc_abi::{Align, Size, WrappingRange};
@@ -16,7 +17,6 @@ use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_hir::def_id::DefId;
 use rustc_middle::bug;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
-use rustc_middle::mir::{PlaceKind, RetagKind};
 use rustc_middle::ty::layout::{
     FnAbiError, FnAbiOfHelpers, FnAbiRequest, HasTypingEnv, LayoutError, LayoutOfHelpers,
     TyAndLayout,
@@ -1393,17 +1393,16 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         self.call_lifetime_intrinsic("llvm.lifetime.end.p0i8", ptr, size);
     }
 
-    fn retag(
-        &mut self,
-        place: PlaceValue<&'ll Value>,
-        place_kind: PlaceKind,
-        retag_kind: RetagKind,
-    ) {
-        self.call_intrinsic("llvm.bsan.retag", &[
-            place.llval,
-            self.cx.const_i8(place_kind as i8),
-            self.cx.const_i8(retag_kind as i8),
-        ]);
+    fn retag(&mut self, place: PlaceValue<Self::Value>, info: RetagInfo) {
+        self.call_intrinsic(
+            "llvm.retag",
+            &[
+                place.llval,
+                self.const_usize(info.size as u64),
+                self.const_u8(info.perm_kind.into()),
+                self.const_u8(info.protector_kind as u8),
+            ],
+        );
     }
 
     fn call(
