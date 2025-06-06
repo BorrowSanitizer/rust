@@ -96,10 +96,10 @@ jobs:
           compression-level: 0
           name: ${{ steps.config.outputs.artifact }}
           path: |
-            ./build/dist/rustc-dev-${{ matrix.config.target }}
-            ./build/dist/rust-dev-${{ matrix.config.target }}
-            ./build/dist/rust-src-${{ matrix.config.target }}
-            ./build/dist/rust-${{ matrix.config.target }}
+            ./build/dist/rustc-dev-${{ matrix.config.target }}.tar.xz
+            ./build/dist/rust-dev-${{ matrix.config.target }}.tar.xz
+            ./build/dist/rust-src-${{ matrix.config.target }}.tar.xz
+            ./build/dist/rust-${{ matrix.config.target }}.tar.xz
   
   release:
     name: Update rolling release
