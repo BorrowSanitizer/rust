@@ -73,23 +73,6 @@ jobs:
           uses: docker/metadata-action@v5
           with:
             images: ${{ env.REGISTRY_IMAGE }}
-          
-        # Our releases artifacts will always be a series of compressed archives
-        # with names matching each supported target. For example, when we're building
-        # an image for `x86_64-unknown-linux-gnu`, we want `x86_64-unknown-linux-gnu.tar.xz`.
-        - name: Resolve URLs
-          id: resolve_urls
-          env:
-            GH_TOKEN: ${{ github.token }}
-          run: |
-            QUERY=".assets[] | select(.url | endswith(\"${{matrix.config.target}}${{ env.COMPRESSION }}\")) | \"\(.url)\""
-            url=$(gh release view ${{ needs.release-info.outputs.tag }} --repo ${{ github.repository }} --json assets -q "$QUERY") 
-            if [ ! "$url" ]; then
-              echo "Unable to resolve url for release asset."
-              exit 1
-            fi
-            echo "url_basename=$(basename $url ${{ env.COMPRESSION }})" >> "$GITHUB_OUTPUT"
-            echo "url=$url" >> "$GITHUB_OUTPUT"
             
         - name: Login
           uses: docker/login-action@v3
@@ -108,21 +91,17 @@ jobs:
           id: build
           uses: docker/build-push-action@v6
           with:
-            context: .
+            context: ./src/ci/bsan/
             file: ./src/ci/bsan/Dockerfile.bsan
             platforms: ${{ matrix.config.platform }}
             labels: ${{ steps.meta.outputs.labels }}
             tags: ${{ env.REGISTRY_IMAGE }}
             outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-            # URL     - The URL of the compressed toolchain, which is downloaded, extracted, and installed when building the image.
+            # URL     - The URL endpoint for artifacts for the rolling release.
             # TARGET  - The current target; e.g. `aarch64-apple-darwin`.
-            # PREFIX  - A string placed before the name of the target for the toolchain installed within the container.
-            #           For example, "$PREFIX-$TARGET" will be listed as the only toolchain installed.
             build-args: |
-              URL=${{ steps.resolve_urls.outputs.url }}
+              URL=https://github.com/BorrowSanitizer/rust/releases/download/rolling
               TARGET=${{ matrix.config.target }}
-              PREFIX=bsan-${{ needs.release-info.outputs.tag }}-${{needs.release-info.outputs.sha}}
-
         - name: Export digest
           run: |
             mkdir -p ${{ runner.temp }}/digests
