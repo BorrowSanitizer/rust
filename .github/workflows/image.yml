@@ -96,6 +96,7 @@ jobs:
             platforms: ${{ matrix.config.platform }}
             labels: ${{ steps.meta.outputs.labels }}
             tags: ${{ env.REGISTRY_IMAGE }}
+            provenance: false
             outputs: type=image,push-by-digest=true,name-canonical=true,push=true
             # URL     - The URL endpoint for artifacts for the rolling release.
             # TARGET  - The current target; e.g. `aarch64-apple-darwin`.
@@ -144,6 +145,7 @@ jobs:
             images: ${{ env.REGISTRY_IMAGE }}
             tags: |
               type=raw,value=${{ needs.release-info.outputs.tag }}
+              
         - name: Create manifest list and push
           working-directory: ${{ runner.temp }}/digests
           run: |
