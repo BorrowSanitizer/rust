@@ -3,18 +3,13 @@ change-id = 140732
 [build]
 build-stage = 2
 extended = true
-tools = [
-    "src",
-    "clippy",
-    "rustdoc",
-    "rustfmt",
-]
 docs = false
 
 [llvm]
 download-ci-llvm = false
 targets = "AArch64;ARM;X86"
 link-shared = true
+clang = true
 
 [rust]
 channel = "dev"
@@ -22,7 +17,7 @@ download-rustc = false
 llvm-tools = true
 lld = true
 llvm-bitcode-linker = true
-
+omit-git-hash = false
 
 [dist]
 compression-profile = "balanced"
