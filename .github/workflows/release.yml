@@ -88,7 +88,8 @@ jobs:
         run: ./x.py dist --config src/bootstrap/defaults/bootstrap.bsan.release.toml
 
       - name: Strip Version
-        run: for f in ./build/dist/*; do mv "$f" "${f%${{ steps.config.outputs.tarball_suffix }}}${{matrix.config.target}}"; done
+        run: for f in ./build/dist/*; do mv "$f" "${f%${{ steps.config.outputs.tarball_suffix }}}${{matrix.config.target}}.tar.xz"; done
+        
       - name: Publish
         uses: actions/upload-artifact@v4
         with:
