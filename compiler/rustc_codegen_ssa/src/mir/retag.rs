@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
 
 use bsan_shared::{Permission, ProtectorKind, RetagInfo};
-use rustc_abi::{BackendRepr, FieldIdx, FieldsShape, VariantIdx, Variants};
+use rustc_abi::{BackendRepr, FieldIdx, FieldsShape, LayoutData, VariantIdx, Variants};
+use rustc_index::IndexVec;
 use rustc_middle::mir::{Place, RetagKind};
 use rustc_middle::ty::layout::{HasTyCtxt, TyAndLayout};
 use rustc_middle::ty::{self, Mutability};
@@ -11,9 +12,8 @@ use tracing::trace;
 use super::operand::OperandValue;
 use super::place::PlaceValue;
 use super::{BuilderMethods, FunctionCx, LocalRef};
-use crate::common::IntPredicate;
 use crate::mir::place::PlaceRef;
-use crate::traits::{ConstCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMethods};
+use crate::traits::MiscCodegenMethods;
 
 // When we retag a Place, we need to traverse through all of its fields
 // and/or variants and emit retags for all of the sub-places that contain references,
@@ -26,64 +26,63 @@ use crate::traits::{ConstCodegenMethods, LayoutTypeCodegenMethods, MiscCodegenMe
 // repeat work. For example, if a variant of an enum contains N sub-places that need retagging,
 // then we only want to have to branch that variant once, instead of N times for each sub-place.
 
+static VARIANT_BLOCK: &str = "v";
+
+#[allow(dead_code)]
+static VARIANT_DEFAULT_BLOCK: &str = "v_def";
+
+#[allow(dead_code)]
+static VARIANT_TERMINATOR: &str = "v_t";
+
 /// Either a variant or a field.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum Modifier {
-    Variant(VariantIdx),
+#[allow(dead_code)]
+enum Modifier<'tcx> {
+    Variant(TyAndLayout<'tcx>),
     Field(FieldIdx),
 }
 
-impl Modifier {
-    fn apply_to<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+impl<'tcx> Modifier<'tcx> {
+    fn apply_to<'a, Bx: BuilderMethods<'a, 'tcx>>(
         self,
-        fx: &mut FunctionCx<'a, 'tcx, Bx>,
         bx: &mut Bx,
-        place: &PlaceRef<'tcx, Bx::Value>,
-    ) -> (PlaceRef<'tcx, Bx::Value>, Option<(Bx::BasicBlock, Bx::BasicBlock)>) {
+        place: &mut PlaceRef<'tcx, Bx::Value>,
+    ) -> (PlaceRef<'tcx, Bx::Value>, Option<Bx::BasicBlock>) {
         match self {
-            Modifier::Variant(idx) => {
-                let cx = bx.cx();
-                let discrminant_ty = place.layout.ty.discriminant_ty(cx.tcx());
-                let discrminant_for_variant = place
-                    .layout
-                    .ty
-                    .discriminant_for_variant(cx.tcx(), idx)
-                    .expect("Invalid variant.");
-
-                let discriminant_backend_ty =
-                    bx.immediate_backend_type(bx.layout_of(discrminant_ty));
-                let discriminant_for_variant =
-                    bx.const_uint_big(discriminant_backend_ty, discrminant_for_variant.val);
-
-                let operand = bx.load_operand(*place);
-
-                let discriminant_actual = operand.codegen_get_discr(fx, bx, discrminant_ty);
-
-                let is_variant = bx.append_sibling_block("variant");
-
-                let is_not_variant = bx.append_sibling_block("cont");
-
-                let cond =
-                    bx.icmp(IntPredicate::IntEQ, discriminant_for_variant, discriminant_actual);
-
-                bx.cond_br(cond, is_variant, is_not_variant);
-
-                bx.switch_to_block(is_variant);
-                (place.project_downcast(bx, idx), Some((is_variant, is_not_variant)))
+            Modifier::Variant(layout) => {
+                let block = Some(bx.append_sibling_block(VARIANT_BLOCK));
+                place.layout = layout;
+                (*place, block)
             }
             Modifier::Field(field_idx) => (place.project_field(bx, field_idx.as_usize()), None),
         }
     }
 }
+
+#[allow(dead_code)]
 struct RetagCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     kind: RetagKind,
+    root_place: PlaceRef<'tcx, Bx::Value>,
     places: Vec<PlaceRef<'tcx, Bx::Value>>,
-    modifiers: Vec<Modifier>,
-    branches: Vec<Bx::BasicBlock>,
+    root_block: Bx::BasicBlock,
+    blocks: Vec<Bx::BasicBlock>,
+    modifiers: Vec<Modifier<'tcx>>,
+    terminator_block: Option<Bx::BasicBlock>,
     data: PhantomData<&'a ()>,
 }
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
+    #[inline]
+    fn curr_place(&self) -> PlaceRef<'tcx, Bx::Value> {
+        *self.places.last().unwrap_or(&self.root_place)
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    fn curr_block(&self) -> Bx::BasicBlock {
+        *self.blocks.last().unwrap_or(&self.root_block)
+    }
+
     fn visit(
         fx: &mut FunctionCx<'a, 'tcx, Bx>,
         bx: &mut Bx,
@@ -92,36 +91,31 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
     ) {
         let mut visitor = Self {
             kind,
-            places: vec![base],
+            root_place: base,
+            places: vec![],
+            root_block: bx.llbb(),
+            blocks: vec![],
+            terminator_block: None,
             modifiers: vec![],
-            branches: vec![],
-            data: PhantomData::default(),
+            data: PhantomData,
         };
         visitor.visit_value(fx, bx, base.layout);
     }
 
     /// Applies each of the current modifiers to the base PlaceRef, cg-ing along the way.
     #[allow(dead_code)]
-    fn crystallize(
-        &mut self,
-        fx: &mut FunctionCx<'a, 'tcx, Bx>,
-        bx: &mut Bx,
-    ) -> PlaceRef<'tcx, Bx::Value> {
-        let mut curr_subplace = *self.places.last().unwrap();
-
-        let modifiers: Vec<Modifier> = self.modifiers.drain(..).collect();
-
-        for modifier in modifiers {
-            let (subplace, branch) = modifier.apply_to(fx, bx, &curr_subplace);
-            if let Some((then, otherwise)) = branch {
-                bx.switch_to_block(then);
-                self.branches.push(otherwise)
-            }
+    fn crystallize(&mut self, bx: &mut Bx) -> PlaceRef<'tcx, Bx::Value> {
+        let mut curr_subplace = self.curr_place();
+        for modifier in self.modifiers.drain(..) {
+            let (subplace, block) = modifier.apply_to(bx, &mut curr_subplace);
             curr_subplace = subplace;
+            if let Some(block) = block {
+                bx.switch_to_block(block);
+                self.blocks.push(block);
+            }
             self.places.push(curr_subplace);
         }
-
-        return curr_subplace;
+        curr_subplace
     }
 
     // Recursive actions, ready to be overloaded.
@@ -132,23 +126,24 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         fx: &mut FunctionCx<'a, 'tcx, Bx>,
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
-    ) {
+    ) -> bool {
         // If this place is smaller than a pointer, we know that it can't contain any
         // pointers we need to retag, so we can stop recursion early.
         // This optimization is crucial for ZSTs, because they can contain way more fields
         // than we can ever visit.
         if layout.is_sized() && layout.size < bx.tcx().data_layout.pointer_size {
-            return;
+            return true;
         }
 
         // Check the type of this value to see what to do with it (retag, or recurse).
         match layout.ty.kind() {
             // If it is a trait object, switch to the real type that was used to create it.
-            ty::Dynamic(_data, _, ty::Dyn) => {}
-            ty::Dynamic(_data, _, ty::DynStar) => {}
+            ty::Dynamic(_data, _, ty::Dyn) => false,
+            ty::Dynamic(_data, _, ty::DynStar) => false,
             &ty::Ref(_, _, mutability) => {
-                let place = self.crystallize(fx, bx);
+                let place = self.crystallize(bx);
                 self.retag_ref_ty(bx, place, mutability);
+                false
             }
 
             ty::RawPtr(_, _) => {
@@ -156,12 +151,14 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                 // pointers have fields, and for dyn Trait pointees those can have reference
                 // type!
                 // We also do not want to reborrow them.
+                false
             }
+
             ty::Adt(adt, _) if adt.is_box() => {
                 // Recurse for boxes, they require some tricky handling and will end up in `visit_box` above.
                 // (Yes this means we technically also recursively retag the allocator itself
                 // even if field retagging is not enabled. *shrug*)
-                self.walk_value(fx, bx, layout);
+                self.walk_value(fx, bx, layout)
             }
             _ => {
                 // Not a reference/pointer/box. Only recurse if configured appropriately.
@@ -177,9 +174,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                         )
                     }
                 };
-                if recurse {
-                    self.walk_value(fx, bx, layout)
-                }
+                if recurse { self.walk_value(fx, bx, layout) } else { false }
             }
         }
     }
@@ -196,35 +191,82 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
         idx: FieldIdx,
-    ) {
+    ) -> bool {
         self.modifiers.push(Modifier::Field(idx));
-        self.visit_value(fx, bx, layout.field(bx.cx(), idx.as_usize()));
+        let branched = self.visit_value(fx, bx, layout.field(bx.cx(), idx.as_usize()));
         if self.modifiers.is_empty() {
             self.places.pop().expect("A place should have been evaluated.");
         } else {
             self.modifiers.pop().expect("An unevaluated modifier should be present.");
         }
+        branched
     }
     /// Called when recursing into an enum variant.
     /// This gives the visitor the chance to track the stack of nested fields that
     /// we are descending through.
     #[inline(always)]
-    fn visit_variant(
+    #[allow(dead_code)]
+    fn visit_variants(
         &mut self,
         fx: &mut FunctionCx<'a, 'tcx, Bx>,
         bx: &mut Bx,
-        layout: TyAndLayout<'tcx>,
-        vidx: VariantIdx,
+        this: TyAndLayout<'tcx>,
+        variants: &IndexVec<VariantIdx, LayoutData<FieldIdx, VariantIdx>>,
     ) {
-        self.modifiers.push(Modifier::Variant(vidx));
-        self.visit_value(fx, bx, layout.for_variant(bx.cx(), vidx));
-        if self.modifiers.is_empty() {
-            self.places.pop().expect("A place should have been resolved.");
-            let otherwise = self.branches.pop().expect("A conditional should have been inserted.");
-            bx.br(otherwise);
-            bx.switch_to_block(otherwise);
-        } else {
-            self.modifiers.pop();
+        let mut cases: Vec<(u128, Bx::BasicBlock)> = vec![];
+        for (vidx, data) in variants.indices().zip(&variants.raw) {
+            let layout = bx.tcx().mk_layout(data.clone());
+            let variant_layout = TyAndLayout { ty: this.ty, layout };
+
+            self.modifiers.push(Modifier::Variant(variant_layout));
+            let branched = self.visit_value(fx, bx, variant_layout);
+
+            if self.modifiers.is_empty() {
+                if self.terminator_block.is_none() {
+                    self.terminator_block = Some(bx.append_sibling_block(VARIANT_TERMINATOR))
+                }
+
+                let terminator_block = self.terminator_block.unwrap();
+
+                let discr = this
+                    .ty
+                    .discriminant_for_variant(bx.cx().tcx(), vidx)
+                    .expect("Invalid variant.");
+
+                let block = self.blocks.pop().expect("A block should have been resolved.");
+
+                if !branched {
+                    bx.switch_to_block(block);
+                    bx.br(terminator_block);
+                }
+                bx.switch_to_block(self.curr_block());
+
+                cases.push((discr.val, block))
+            } else {
+                self.modifiers.pop();
+            }
+        }
+
+        if !cases.is_empty() {
+            let current_block = self.curr_block();
+            let current_place = self.curr_place();
+            bx.switch_to_block(current_block);
+
+            let discr_ty = this.ty.discriminant_ty(bx.cx().tcx());
+            let place_operand = bx.load_operand(current_place);
+            let discr_value = place_operand.codegen_get_discr(fx, bx, discr_ty);
+
+            let sibling = bx.append_sibling_block(VARIANT_DEFAULT_BLOCK);
+
+            let terminator_block = self.terminator_block.unwrap();
+
+            bx.switch_to_block(sibling);
+            bx.br(terminator_block);
+
+            bx.switch_to_block(current_block);
+            bx.switch(discr_value, sibling, cases.drain(..));
+
+            bx.switch_to_block(terminator_block);
         }
     }
 
@@ -296,7 +338,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
             let perm_kind = Permission::new_reserved(ty_is_freeze, is_protected);
             let perm = RetagInfo::new(size, perm_kind, protector_kind);
             bx.retag(place.val, perm);
-            todo!()
         }
     }
 
@@ -306,13 +347,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         fx: &mut FunctionCx<'a, 'tcx, Bx>,
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
-    ) {
+    ) -> bool {
         let ty = layout.ty;
 
         trace!("walk_value: type: {ty}");
 
         // Special treatment for special types, where the (static) layout is not sufficient.
-        match *ty.kind() {
+        let branched_special = match *ty.kind() {
             // If it is a trait object, switch to the real type that was used to create it.
             // ty placement with length 0, so we enter the `Array` case below which
             // indirectly uses the metadata to determine the actual length.
@@ -323,7 +364,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                 assert_eq!(layout.fields.count(), 2, "`Box` must have exactly 2 fields");
 
                 if ty.is_box_global(bx.tcx()) {
-                    let current_place = self.crystallize(fx, bx);
+                    let current_place = self.crystallize(bx);
                     let unique_ptr = current_place.project_field(bx, 0);
                     let inner_ptr = self.inner_ptr_of_unique(bx, unique_ptr);
                     self.retag_unique_ty(bx, inner_ptr);
@@ -331,53 +372,44 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
 
                 // The second `Box` field is the allocator, which we recursively check for validity
                 // like in regular structs.
-                self.visit_field(fx, bx, layout, FieldIdx::from_usize(1));
+                self.visit_field(fx, bx, layout, FieldIdx::from_usize(1))
             }
-
-            // Non-normalized types should never show up here.
-            ty::Param(..)
-            | ty::Alias(..)
-            | ty::Bound(..)
-            | ty::Placeholder(..)
-            | ty::Infer(..)
-            | ty::Error(..) => {}
-
             // The rest is handled below.
-            _ => {}
+            _ => false,
         };
 
         // Visit the fields of this value.
-        match &layout.fields {
-            FieldsShape::Primitive => {}
-            FieldsShape::Arbitrary { memory_index, .. } => {
-                for idx in memory_index.indices() {
-                    self.visit_field(fx, bx, layout, idx);
-                }
-            }
-            FieldsShape::Array { .. } => {
-                for idx in layout.fields.index_by_increasing_offset() {
-                    self.visit_field(fx, bx, layout, FieldIdx::from_usize(idx));
-                }
-            }
-            _ => {}
-        }
+        let branched_last_field = match &layout.fields {
+            FieldsShape::Primitive => branched_special,
+            FieldsShape::Arbitrary { memory_index, .. } => memory_index
+                .indices()
+                .map(|idx| self.visit_field(fx, bx, layout, idx))
+                .last()
+                .unwrap_or(branched_special),
+            FieldsShape::Array { .. } => layout
+                .fields
+                .index_by_increasing_offset()
+                .map(|idx| self.visit_field(fx, bx, layout, FieldIdx::from_usize(idx)))
+                .last()
+                .unwrap_or(branched_special),
+            _ => branched_special,
+        };
 
         match &layout.variants {
-            Variants::Multiple { tag_field, variants, .. } => {
-                self.modifiers.push(Modifier::Field(FieldIdx::from_usize(*tag_field)));
-                for vidx in variants.indices().into_iter() {
-                    self.visit_variant(fx, bx, layout, vidx);
-                }
+            Variants::Multiple { variants, .. } => {
+                self.visit_variants(fx, bx, layout, variants);
+                true
             }
-            Variants::Single { .. } => {}
-            Variants::Empty => {}
+            Variants::Single { .. } | Variants::Empty => branched_last_field,
         }
     }
 }
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     pub(crate) fn codegen_retag(&mut self, bx: &mut Bx, place: &Place<'tcx>, kind: RetagKind) {
-        self.resolve_place(bx, place).map(|place| RetagCx::visit(self, bx, place, kind));
+        if let Some(place) = self.resolve_place(bx, place) {
+            RetagCx::visit(self, bx, place, kind)
+        }
     }
 
     fn resolve_place(
@@ -399,7 +431,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                                 Some(PlaceValue::new_sized(llval, op.layout.align.abi))
                             }
                             OperandValue::Pair(llptr, _) => {
-                                Some(PlaceValue::new_sized(llptr, op.layout.align.abi).into())
+                                Some(PlaceValue::new_sized(llptr, op.layout.align.abi))
                             }
                             OperandValue::ZeroSized => None,
                         };

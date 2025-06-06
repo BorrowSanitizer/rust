@@ -3089,11 +3089,11 @@ pub(crate) mod dep_tracking {
     use super::{
         AutoDiff, BranchProtection, CFGuard, CFProtection, CollapseMacroDebuginfo, CoverageOptions,
         CrateType, DebugInfo, DebugInfoCompression, ErrorOutputType, FmtDebug, FunctionReturn,
-        InliningThreshold, InstrumentCoverage, InstrumentXRay, LinkerPluginLto, LLVMRetagFields,
-        LocationDetail, LtoCli, MirStripDebugInfo, NextSolverConfig, OomStrategy, OptLevel, OutFileName,
-        OutputType, OutputTypes, PatchableFunctionEntry, Polonius, RemapPathScopeComponents,
-        ResolveDocLinks, SourceFileHashAlgorithm, SplitDwarfKind, SwitchWithOptPath,
-        SymbolManglingVersion, WasiExecModel,
+        InliningThreshold, InstrumentCoverage, InstrumentXRay, LLVMRetagFields, LinkerPluginLto,
+        LocationDetail, LtoCli, MirStripDebugInfo, NextSolverConfig, OomStrategy, OptLevel,
+        OutFileName, OutputType, OutputTypes, PatchableFunctionEntry, Polonius,
+        RemapPathScopeComponents, ResolveDocLinks, SourceFileHashAlgorithm, SplitDwarfKind,
+        SwitchWithOptPath, SymbolManglingVersion, WasiExecModel,
     };
     use crate::lint;
     use crate::utils::NativeLib;
@@ -3471,4 +3471,3 @@ impl MirIncludeSpans {
         self == MirIncludeSpans::On
     }
 }
-
