@@ -1,77 +1,24 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rust-lang/www.rust-lang.org/master/static/images/rust-social-wide-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/rust-lang/www.rust-lang.org/master/static/images/rust-social-wide-light.svg">
-    <img alt="The Rust Programming Language: A language empowering everyone to build reliable and efficient software"
-         src="https://raw.githubusercontent.com/rust-lang/www.rust-lang.org/master/static/images/rust-social-wide-light.svg"
-         width="50%">
-  </picture>
+# <a href="https://borrowsanitizer.com"><img height="60px" src="https://borrowsanitizer.com/images/bsan.svg" alt="BorrowSanitizer" /></a> <a href=""><picture><source media="(prefers-color-scheme: dark)" height="60px" height="60px" srcset="https://borrowsanitizer.com/images/bsan-text-dark.svg"/><img height="60px" height="60px" src="https://borrowsanitizer.com/images/bsan-text-light.svg" alt="BorrowSanitizer" /></picture></a>
 
-[Website][Rust] | [Getting started] | [Learn] | [Documentation] | [Contributing]
-</div>
+This is our fork of the Rust compiler.
 
-This is the main source code repository for [Rust]. It contains the compiler,
-standard library, and documentation.
+Nearly all of BorrowSanitizer can be implemented as an [external plugin](https://github.com/BorrowSanitizer/bsan). However, we still needed to modify the Rust compiler to support lowering [retag statements](https://doc.rust-lang.org/beta/nightly-rustc/rustc_middle/mir/enum.StatementKind.html#variant.Retag) from MIR into special LLVM intrinsics. The BorrowSanitizer plugin converts these intrinsics into calls to our runtime library. 
 
-[Rust]: https://www.rust-lang.org/
-[Getting Started]: https://www.rust-lang.org/learn/get-started
-[Learn]: https://www.rust-lang.org/learn
-[Documentation]: https://www.rust-lang.org/learn#learn-use
-[Contributing]: CONTRIBUTING.md
+You can enable LLVM retag intrinsics with an unstable flag:
+```
+-Zllvm-emit-retag
+```
+You can specify whether to recurse into aggregate and sum types using another unstable flag:
+```
+-Zllvm-retag-fields[=<all|none|scalar>]
+```
+This has the same behavior as Miri's `-Zmiri-retag-fields`. It is set to `all` by default, and setting it to `none` is unsound. We do not support retagging dynamic trait objects yet. 
 
-## Why Rust?
+Our LLVM retag intrinsics (`@llvm.retag`) are defined in our [fork of LLVM](https://github.com/BorrowSanitizer/llvm-project). If you want to build the Rust compiler from source, then you will also need to build our fork of LLVM. Make sure to provide the following configuration in your [`bootstrap.toml`](https://rustc-dev-guide.rust-lang.org/building/how-to-build-and-run.html#create-a-bootstraptoml) file.
+```
+[llvm]
+download-ci-llvm = false
+```
+Visit Rust's [development guide](https://rustc-dev-guide.rust-lang.org/building/how-to-build-and-run.html) for additional instructions on how to build the compiler from source.
 
-- **Performance:** Fast and memory-efficient, suitable for critical services, embedded devices, and easily integrated with other languages.
-
-- **Reliability:** Our rich type system and ownership model ensure memory and thread safety, reducing bugs at compile-time.
-
-- **Productivity:** Comprehensive documentation, a compiler committed to providing great diagnostics, and advanced tooling including package manager and build tool ([Cargo]), auto-formatter ([rustfmt]), linter ([Clippy]) and editor support ([rust-analyzer]).
-
-[Cargo]: https://github.com/rust-lang/cargo
-[rustfmt]: https://github.com/rust-lang/rustfmt
-[Clippy]: https://github.com/rust-lang/rust-clippy
-[rust-analyzer]: https://github.com/rust-lang/rust-analyzer
-
-## Quick Start
-
-Read ["Installation"] from [The Book].
-
-["Installation"]: https://doc.rust-lang.org/book/ch01-01-installation.html
-[The Book]: https://doc.rust-lang.org/book/index.html
-
-## Installing from Source
-
-If you really want to install from source (though this is not recommended), see
-[INSTALL.md](INSTALL.md).
-
-## Getting Help
-
-See https://www.rust-lang.org/community for a list of chat platforms and forums.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-Rust is primarily distributed under the terms of both the MIT license and the
-Apache License (Version 2.0), with portions covered by various BSD-like
-licenses.
-
-See [LICENSE-APACHE](LICENSE-APACHE), [LICENSE-MIT](LICENSE-MIT), and
-[COPYRIGHT](COPYRIGHT) for details.
-
-## Trademark
-
-[The Rust Foundation][rust-foundation] owns and protects the Rust and Cargo
-trademarks and logos (the "Rust Trademarks").
-
-If you want to use these names or brands, please read the
-[Rust language trademark policy][trademark-policy].
-
-Third-party logos may be subject to third-party copyrights and trademarks. See
-[Licenses][policies-licenses] for details.
-
-[rust-foundation]: https://rustfoundation.org/
-[trademark-policy]: https://rustfoundation.org/policy/rust-trademark-policy/
-[policies-licenses]: https://www.rust-lang.org/policies/licenses
+Alternatively, you can use our [Docker image](https://github.com/BorrowSanitizer/rust/pkgs/container/rust). We use this image as the base for our dev container and release images.

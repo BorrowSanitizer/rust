@@ -727,7 +727,7 @@ pub fn configure_cmake(
         Some(ref cl) => (cl.into(), cl.into()),
         None => (builder.cc(target), builder.cxx(target).unwrap()),
     };
-
+    println!("{:?}\n{:?}", cc, cxx);
     // If ccache is configured we inform the build a little differently how
     // to invoke ccache while also invoking our compilers.
     if use_compiler_launcher {

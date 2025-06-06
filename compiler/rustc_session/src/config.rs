@@ -293,32 +293,6 @@ impl LinkerPluginLto {
     }
 }
 
-/// Whether retagging recurses into fields. `All` means it always recurses (the default,
-/// and equivalent to -Zmiri-retag-fields without an explicit value), `None` means it never
-/// recurses, `Scalar` means it only recurses for types where we would also emit noalias annotations
-/// in the generated LLVM IR (types passed as individual scalars or pairs of scalars). Setting this
-/// to `None`` is unsound.
-#[derive(Clone, Copy, Default, PartialEq, Hash, Debug)]
-pub enum LLVMRetagFields {
-    #[default]
-    All,
-    None,
-    Scalar,
-}
-
-impl FromStr for LLVMRetagFields {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, ()> {
-        Ok(match s {
-            "all" => LLVMRetagFields::All,
-            "none" => LLVMRetagFields::None,
-            "scalar" => LLVMRetagFields::Scalar,
-            _ => return Err(()),
-        })
-    }
-}
-
 /// The different values `-C link-self-contained` can take: a list of individually enabled or
 /// disabled components used during linking, coming from the rustc distribution, instead of being
 /// found somewhere on the host system.
@@ -597,6 +571,13 @@ impl FromStr for SplitDwarfKind {
             _ => return Err(()),
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+pub enum LLVMRetagFields {
+    All,
+    None,
+    Scalar,
 }
 
 macro_rules! define_output_types {
@@ -3089,11 +3070,11 @@ pub(crate) mod dep_tracking {
     use super::{
         AutoDiff, BranchProtection, CFGuard, CFProtection, CollapseMacroDebuginfo, CoverageOptions,
         CrateType, DebugInfo, DebugInfoCompression, ErrorOutputType, FmtDebug, FunctionReturn,
-        InliningThreshold, InstrumentCoverage, InstrumentXRay, LinkerPluginLto, LLVMRetagFields,
-        LocationDetail, LtoCli, MirStripDebugInfo, NextSolverConfig, OomStrategy, OptLevel, OutFileName,
-        OutputType, OutputTypes, PatchableFunctionEntry, Polonius, RemapPathScopeComponents,
-        ResolveDocLinks, SourceFileHashAlgorithm, SplitDwarfKind, SwitchWithOptPath,
-        SymbolManglingVersion, WasiExecModel,
+        InliningThreshold, InstrumentCoverage, InstrumentXRay, LLVMRetagFields, LinkerPluginLto,
+        LocationDetail, LtoCli, MirStripDebugInfo, NextSolverConfig, OomStrategy, OptLevel,
+        OutFileName, OutputType, OutputTypes, PatchableFunctionEntry, Polonius,
+        RemapPathScopeComponents, ResolveDocLinks, SourceFileHashAlgorithm, SplitDwarfKind,
+        SwitchWithOptPath, SymbolManglingVersion, WasiExecModel,
     };
     use crate::lint;
     use crate::utils::NativeLib;
@@ -3172,7 +3153,6 @@ pub(crate) mod dep_tracking {
         TargetTuple,
         Edition,
         LinkerPluginLto,
-        LLVMRetagFields,
         ResolveDocLinks,
         SplitDebuginfo,
         SplitDwarfKind,
@@ -3185,6 +3165,7 @@ pub(crate) mod dep_tracking {
         OutFileName,
         OutputType,
         RealFileName,
+        LLVMRetagFields,
         LocationDetail,
         FmtDebug,
         BranchProtection,
@@ -3471,4 +3452,3 @@ impl MirIncludeSpans {
         self == MirIncludeSpans::On
     }
 }
-

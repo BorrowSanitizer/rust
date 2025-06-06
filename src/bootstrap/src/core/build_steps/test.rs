@@ -10,7 +10,6 @@ use std::{env, fs, iter};
 
 use clap_complete::shells;
 
-use crate::core::build_steps::bsan::BsanRT;
 use crate::core::build_steps::compile::run_cargo;
 use crate::core::build_steps::doc::DocumentationFormat;
 use crate::core::build_steps::gcc::{Gcc, add_cg_gcc_cargo_flags};
@@ -465,12 +464,12 @@ impl Step for Rustfmt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BsanRTCore {
+pub struct BsanRT {
     stage: u32,
     host: TargetSelection,
 }
 
-impl Step for BsanRTCore {
+impl Step for BsanRT {
     type Output = ();
     const ONLY_HOSTS: bool = true;
 
@@ -479,7 +478,7 @@ impl Step for BsanRTCore {
     }
 
     fn make_run(run: RunConfig<'_>) {
-        run.builder.ensure(BsanRTCore { stage: run.builder.top_stage, host: run.target });
+        run.builder.ensure(BsanRT { stage: run.builder.top_stage, host: run.target });
     }
 
     /// Runs `cargo test` for rustfmt.
@@ -488,7 +487,7 @@ impl Step for BsanRTCore {
         let host = self.host;
         let compiler = builder.compiler(stage, host);
 
-        builder.ensure(bsan::BsanRTCore { compiler, target: self.host });
+        builder.ensure(bsan::BsanRT { compiler, target: host });
 
         let mut cargo = tool::prepare_tool_cargo(
             builder,
@@ -501,7 +500,7 @@ impl Step for BsanRTCore {
             &[],
         );
         cargo.add_rustc_lib_path(builder);
-        run_cargo_test(cargo, &[], &[], "bsan-rt", self.host, builder);
+        run_cargo_test(cargo, &[], &[], "bsan-rt", host, builder);
     }
 }
 
@@ -515,7 +514,8 @@ impl BsanDriver {
         builder: &Builder<'_>,
         compiler: Compiler,
         target: TargetSelection,
-        bsan_runtime_dir: &PathBuf,
+        plugin: &Path,
+        bsan_runtime_dir: &Path,
     ) -> PathBuf {
         let bsan_sysroot = builder.out.join(compiler.host).join("bsan-sysroot");
         let mut cargo = builder::Cargo::new(
@@ -531,8 +531,8 @@ impl BsanDriver {
         cargo.env("BSAN_LIB_SRC", builder.src.join("library"));
         // Tell it where to put the sysroot.
         cargo.env("BSAN_SYSROOT", &bsan_sysroot);
-        cargo.env("BSAN_RT_SYSROOT", bsan_runtime_dir);
-
+        cargo.env("BSAN_PLUGIN", plugin);
+        cargo.env("BSAN_RT_DIR", bsan_runtime_dir);
         let mut cargo = BootstrapCommand::from(cargo);
         let _guard =
             builder.msg(Kind::Build, compiler.stage, "bsan sysroot", compiler.host, target);
@@ -572,7 +572,7 @@ impl Step for BsanDriver {
         let target = self.target;
         let stage = builder.top_stage;
 
-        // Miri can only be tested at stage N for N > 0 because it relies on having
+        // BSAN can only be tested at stage N for N > 0 because it relies on having
         // the stage N-1 compiler built to ensure that rustc and rustdoc are the
         // same. We have the additional restriction that the BSAN runtime must be built,
         // and the earliest this happens is in stage 1. This means that we are limited to testing
@@ -593,7 +593,7 @@ impl Step for BsanDriver {
 
         // We need the BSAN runtime to be available so that we can
         // build our instrumented sysroot.
-        builder.ensure(BsanRT { compiler: host_compiler, target: host });
+        builder.ensure(bsan::BsanRT { compiler: host_compiler, target: host });
 
         // Build our tools.
         let bsan_driver =
@@ -602,13 +602,16 @@ impl Step for BsanDriver {
         // the ui tests also assume cargo-bsan has been built
         builder.ensure(tool::CargoBsan { compiler: host_compiler, target: host });
 
+        let pass = builder.ensure(bsan::BsanLLVMPass { compiler: host_compiler, target: host });
+
         // We also need sysroots, for BSAN and for the host (the latter for build scripts).
         // This is for the tests so everything is done with the target compiler.
         let bsan_sysroot = BsanDriver::build_bsan_sysroot(
             builder,
             target_compiler,
             target,
-            &builder.sysroot(host_compiler),
+            &pass,
+            &builder.sysroot(host_compiler).join("lib"),
         );
 
         builder.ensure(compile::Std::new(target_compiler, host));
@@ -632,7 +635,7 @@ impl Step for BsanDriver {
             Mode::ToolRustc,
             host,
             Kind::Test,
-            "src/tools/bsan/bsan-driver",
+            "src/tools/bsan/",
             SourceType::InTree,
             &[],
         );
@@ -641,10 +644,9 @@ impl Step for BsanDriver {
 
         // We can NOT use `run_cargo_test` since BSAN's integration tests do not use the usual test
         // harness and therefore do not understand the flags added by `add_flags_and_try_run_test`.
-        let mut cargo = prepare_cargo_test(cargo, &[], &[], self.target, builder);
+        let mut cargo = prepare_cargo_test(cargo, &[], &["bsan".to_string()], self.target, builder);
 
         // bsan tests need to know about the stage sysroot
-
         cargo.env("BSAN_SYSROOT", &bsan_sysroot);
         cargo.env("BSAN_HOST_SYSROOT", &host_sysroot);
 
@@ -654,12 +656,9 @@ impl Step for BsanDriver {
         // is a dynamically linked library; otherwise, the StageN-1 compiler
         // used by bsan-driver will link against the runtime in the that
         // sysroot automatically.
-
-        cargo.env("BSAN_RT_SYSROOT", &builder.sysroot(host_compiler));
-        cargo.env("BSAN", &bsan_driver.tool_path);
-
-        // Set the target.
-        cargo.env("BSAN_TEST_TARGET", target.rustc_target_arg());
+        cargo.env("BSAN_RT_DIR", &builder.sysroot(host_compiler).join("lib"));
+        cargo.env("BSAN_PLUGIN", &pass);
+        cargo.env("BSAN_DRIVER", &bsan_driver.tool_path);
         {
             let _guard = builder.msg_sysroot_tool(Kind::Test, stage, "bsan", host, target);
             let _time = helpers::timeit(builder);
