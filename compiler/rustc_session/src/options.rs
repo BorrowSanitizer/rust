@@ -793,7 +793,6 @@ mod desc {
     pub(crate) const parse_inlining_threshold: &str =
         "either a boolean (`yes`, `no`, `on`, `off`, etc), or a non-negative number";
     pub(crate) const parse_llvm_module_flag: &str = "<key>:<type>:<value>:<behavior>. Type must currently be `u32`. Behavior should be one of (`error`, `warning`, `require`, `override`, `append`, `appendunique`, `max`, `min`)";
-    pub(crate) const parse_llvm_retag_fields: &str = "one of `all`, `none`, or `scalar`";
     pub(crate) const parse_function_return: &str = "`keep` or `thunk-extern`";
     pub(crate) const parse_wasm_c_abi: &str = "`legacy` or `spec`";
     pub(crate) const parse_mir_include_spans: &str =
@@ -1882,14 +1881,6 @@ pub mod parse {
         true
     }
 
-    pub(crate) fn parse_llvm_retag_fields(slot: &mut LLVMRetagFields, v: Option<&str>) -> bool {
-        match v.and_then(|s| LLVMRetagFields::from_str(s).ok()) {
-            Some(retagfields) => *slot = retagfields,
-            _ => return false,
-        }
-        true
-    }
-
     pub(crate) fn parse_function_return(slot: &mut FunctionReturn, v: Option<&str>) -> bool {
         match v {
             Some("keep") => *slot = FunctionReturn::Keep,
@@ -2300,11 +2291,6 @@ options! {
     llvm_emit_retag: bool = (false, parse_bool, [TRACKED],
         "emit Retagging LLVM intrinsics; implies -Zmir-opt-level=0 and -Zmir-emit-retag\
         (default: no)"),
-    llvm_retag_fields: LLVMRetagFields = (LLVMRetagFields::default(), parse_llvm_retag_fields, [TRACKED],
-        "control whether retags are recursively applied to the fields of a place (default: `all`). \
-        `all` emits retags for every field.
-        `none` skips retagging fields. This option is unsound.
-        `scalar` only retags fields of values with a scalar ABI."),
     lint_mir: bool = (false, parse_bool, [UNTRACKED],
         "lint MIR before and after each transformation"),
     llvm_module_flag: Vec<(String, u32, String)> = (Vec::new(), parse_llvm_module_flag, [TRACKED],
