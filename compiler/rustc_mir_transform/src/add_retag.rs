@@ -49,7 +49,7 @@ fn may_contain_reference<'tcx>(ty: Ty<'tcx>, depth: u32, tcx: TyCtxt<'tcx>) -> b
 
 impl<'tcx> crate::MirPass<'tcx> for AddRetag {
     fn is_enabled(&self, sess: &rustc_session::Session) -> bool {
-        sess.emit_retags()
+        sess.opts.unstable_opts.mir_emit_retag
     }
 
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
@@ -121,7 +121,6 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
 
         // PART 3
         // Add retag after assignments.
-        let is_bsan = tcx.sess.opts.unstable_opts.llvm_emit_retag;
         for block_data in basic_blocks {
             // We want to insert statements as we iterate. To this end, we
             // iterate backwards using indices.
@@ -152,16 +151,8 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
                                     None
                                 }
                             }
-                            Rvalue::Ref(_, borrow_kind, _) => {
-                                if is_bsan {
-                                    if borrow_kind.allows_two_phase_borrow() {
-                                        Some(RetagKind::TwoPhase)
-                                    } else {
-                                        Some(RetagKind::Default)
-                                    }
-                                } else {
-                                    None
-                                }
+                            Rvalue::Ref(..) => {
+                                None
                             }
                             _ => {
                                 if needs_retag(place) {
