@@ -8,7 +8,13 @@ You can enable LLVM retag intrinsics with an unstable flag:
 ```
 -Zllvm-emit-retag
 ```
-Our LLVM retag intrinsics (`@llvm.retag`) are defined in our [fork of LLVM](https://github.com/BorrowSanitizer/llvm-project). If you want to build the compiler from source, then you will also need to build our fork of LLVM. Make sure to provide the following configuration in [`bootstrap.toml`](https://rustc-dev-guide.rust-lang.org/building/how-to-build-and-run.html#create-a-bootstraptoml).
+You can specify whether to recurse into aggregate and sum types using another unstable flag:
+```
+-Zllvm-retag-fields[=<all|none|scalar>]
+```
+This has the same behavior as Miri's `-Zmiri-retag-fields`. It is set to `all` by default, and setting it to `none` is unsound. We do not support retagging dynamic trait objects yet. 
+
+Our LLVM retag intrinsics (`@llvm.retag`) are defined in our [fork of LLVM](https://github.com/BorrowSanitizer/llvm-project). If you want to build the Rust compiler from source, then you will also need to build our fork of LLVM. Make sure to provide the following configuration in your [`bootstrap.toml`](https://rustc-dev-guide.rust-lang.org/building/how-to-build-and-run.html#create-a-bootstraptoml) file.
 ```
 [llvm]
 download-ci-llvm = false
