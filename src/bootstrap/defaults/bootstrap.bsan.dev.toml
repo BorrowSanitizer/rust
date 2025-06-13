@@ -12,7 +12,6 @@ tools = [
 ]
 
 [rust]
-description = "BorrowSanitizer"
 llvm-tools = true
 
 [llvm]

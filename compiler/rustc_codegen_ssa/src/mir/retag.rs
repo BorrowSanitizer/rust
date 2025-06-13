@@ -62,12 +62,9 @@ impl<'tcx> Modifier<'tcx> {
 #[allow(dead_code)]
 struct RetagCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     kind: RetagKind,
-    root_place: PlaceRef<'tcx, Bx::Value>,
     places: Vec<PlaceRef<'tcx, Bx::Value>>,
-    root_block: Bx::BasicBlock,
     blocks: Vec<Bx::BasicBlock>,
     modifiers: Vec<Modifier<'tcx>>,
-    last_concretized: Option<Modifier<'tcx>>,
     terminator_block: Option<Bx::BasicBlock>,
     data: PhantomData<&'a ()>,
 }
@@ -75,13 +72,13 @@ struct RetagCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
     #[inline]
     fn curr_place(&self) -> PlaceRef<'tcx, Bx::Value> {
-        *self.places.last().unwrap_or(&self.root_place)
+        *self.places.last().unwrap()
     }
 
     #[inline]
     #[allow(dead_code)]
     fn curr_block(&self) -> Bx::BasicBlock {
-        *self.blocks.last().unwrap_or(&self.root_block)
+        *self.blocks.last().unwrap()
     }
 
     fn visit(
@@ -92,13 +89,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
     ) {
         let mut visitor = Self {
             kind,
-            root_place: base,
-            places: vec![],
-            root_block: bx.llbb(),
-            blocks: vec![],
+            places: vec![base],
+            blocks: vec![bx.llbb()],
             terminator_block: None,
             modifiers: vec![],
-            last_concretized: None,
             data: PhantomData,
         };
         visitor.visit_value(fx, bx, base.layout);
@@ -108,8 +102,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
     #[allow(dead_code)]
     fn crystallize(&mut self, bx: &mut Bx) -> PlaceRef<'tcx, Bx::Value> {
         let mut curr_subplace = self.curr_place();
-
-        self.last_concretized = self.modifiers.last().copied();
         for modifier in self.modifiers.drain(..) {
             let (subplace, block) = modifier.apply_to(bx, &mut curr_subplace);
             curr_subplace = subplace;
@@ -119,7 +111,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
             }
             self.places.push(curr_subplace);
         }
-
         curr_subplace
     }
 
@@ -131,13 +122,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         fx: &mut FunctionCx<'a, 'tcx, Bx>,
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
-    ) {
+    ) -> bool {
         // If this place is smaller than a pointer, we know that it can't contain any
         // pointers we need to retag, so we can stop recursion early.
         // This optimization is crucial for ZSTs, because they can contain way more fields
         // than we can ever visit.
         if layout.is_sized() && layout.size < bx.tcx().data_layout.pointer_size {
-            return;
+            return false;
         }
 
         // Check the type of this value to see what to do with it (retag, or recurse).
@@ -161,7 +152,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                 // Recurse for boxes, they require some tricky handling and will end up in `visit_box` above.
                 // (Yes this means we technically also recursively retag the allocator itself
                 // even if field retagging is not enabled. *shrug*)
-                self.walk_value(fx, bx, layout)
+                return self.walk_value(fx, bx, layout);
             }
             _ => {
                 // Not a reference/pointer/box. Only recurse if configured appropriately.
@@ -178,10 +169,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
                     }
                 };
                 if recurse {
-                    self.walk_value(fx, bx, layout)
+                    return self.walk_value(fx, bx, layout);
                 }
             }
         }
+        false
     }
 
     /// Called each time we recurse down to a field of a "product-like" aggregate
@@ -196,15 +188,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
         idx: FieldIdx,
-    ) {
+    ) -> bool {
         let field_layout = layout.field(bx.cx(), idx.as_usize());
         self.modifiers.push(Modifier::Field(idx));
-        self.visit_value(fx, bx, field_layout);
+        let branched = self.visit_value(fx, bx, field_layout);
         if self.modifiers.is_empty() {
             self.places.pop().expect("A place should have been evaluated.");
         } else {
             self.modifiers.pop().expect("An unevaluated modifier should be present.");
         }
+        branched
     }
 
     /// Called when recursing into an enum variant.
@@ -218,17 +211,19 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         bx: &mut Bx,
         this: TyAndLayout<'tcx>,
         variants: &IndexVec<VariantIdx, LayoutData<FieldIdx, VariantIdx>>,
-    ) {
+    ) -> bool {
         let current_block = self.curr_block();
         let current_place = self.curr_place();
 
         let mut cases: Vec<(u128, Bx::BasicBlock)> = vec![];
+
         for (vidx, data) in variants.indices().zip(&variants.raw) {
             let layout = bx.tcx().mk_layout(data.clone());
             let variant_layout = TyAndLayout { ty: this.ty, layout };
 
             self.modifiers.push(Modifier::Variant(variant_layout));
-            self.visit_value(fx, bx, variant_layout);
+            let branched = self.visit_value(fx, bx, variant_layout);
+
             if self.modifiers.is_empty() {
                 let terminator_block = if let Some(block) = self.terminator_block {
                     block
@@ -245,12 +240,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
 
                 let block = self.blocks.pop().expect("A block should have been resolved.");
 
-                if let Some(Modifier::Field(_)) = self.last_concretized.take() {
+                if branched {
                     bx.switch_to_block(block);
                     bx.br(terminator_block);
                 }
-
-                bx.switch_to_block(current_block);
 
                 cases.push((discr.val, block));
 
@@ -258,6 +251,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
             } else {
                 self.modifiers.pop();
             }
+            bx.switch_to_block(current_block);
         }
 
         if !cases.is_empty() {
@@ -273,6 +267,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
             bx.switch(discr_value, terminator_block, cases.drain(..));
 
             bx.switch_to_block(terminator_block);
+
+            true
+        } else {
+            false
         }
     }
 
@@ -353,7 +351,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
         fx: &mut FunctionCx<'a, 'tcx, Bx>,
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
-    ) {
+    ) -> bool {
         let ty = layout.ty;
         trace!("walk_value: type: {ty}");
 
@@ -377,32 +375,36 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> RetagCx<'a, 'tcx, Bx> {
 
                 // The second `Box` field is the allocator, which we recursively check for validity
                 // like in regular structs.
-                self.visit_field(fx, bx, layout, FieldIdx::from_usize(1))
+                return self.visit_field(fx, bx, layout, FieldIdx::from_usize(1));
             }
             // The rest is handled below.
             _ => {}
         };
 
         // Visit the fields of this value.
-        match &layout.fields {
-            FieldsShape::Primitive => {}
+        let branched_last_field = match &layout.fields {
+            FieldsShape::Primitive => false,
             FieldsShape::Arbitrary { memory_index, .. } => {
-                memory_index.indices().for_each(|idx| self.visit_field(fx, bx, layout, idx));
+                return memory_index
+                    .indices()
+                    .map(|idx| self.visit_field(fx, bx, layout, idx))
+                    .last()
+                    .unwrap();
             }
-            FieldsShape::Array { .. } => {
-                layout
-                    .fields
-                    .index_by_increasing_offset()
-                    .for_each(|idx| self.visit_field(fx, bx, layout, FieldIdx::from_usize(idx)));
-            }
-            _ => {}
+            FieldsShape::Array { .. } => layout
+                .fields
+                .index_by_increasing_offset()
+                .map(|idx| self.visit_field(fx, bx, layout, FieldIdx::from_usize(idx)))
+                .last()
+                .unwrap(),
+            _ => false,
         };
 
         match &layout.variants {
             Variants::Multiple { variants, .. } => {
-                self.visit_variants(fx, bx, layout, variants);
+                self.visit_variants(fx, bx, layout, variants)
             }
-            Variants::Single { .. } | Variants::Empty => {}
+            Variants::Single { .. } | Variants::Empty => branched_last_field,
         }
     }
 }
