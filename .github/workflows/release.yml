@@ -31,7 +31,7 @@ jobs:
       - name: Set version info
         id: info
         run: |
-            export RUSTC_VERSIsmoke, N=$(cat src/version)
+            export RUSTC_VERSION=$(cat src/version)
             export DATE=$(git log -1 --format=%cd --date=format:%Y-%m-%d)
             export RUSTC_SHA=$(git rev-parse HEAD)
             export RELEASE_NAME="$DATE-$(echo $RUSTC_SHA | cut -c1-7)"
