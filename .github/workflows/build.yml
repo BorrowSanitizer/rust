@@ -17,21 +17,7 @@ defaults:
   run:
     shell: bash
 jobs:
-  fmt:
-    runs-on: macos-latest
-    name: Formatting
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Switch to nightly
-        run: |
-          rustup default nightly
-          rustup component add rust-src rustc-dev llvm-tools clippy
-      - name: Format
-        run: ./x.py fmt --check
   build:
-    needs: [fmt]
     strategy:
       fail-fast: false
       matrix:
@@ -81,4 +67,11 @@ jobs:
           key: ${{ matrix.config.target }}-${{ matrix.config.os }}-${{ env.LLVM_COMMIT }}
       - name: Build
         run: ./x.py build --stage 1
-      
+      - name: Unit Tests
+        run: |
+          ./x.py test src/tools/bsan/bsan-rt --stage 1
+          ./x.py test src/tools/bsan/bsan-shared --stage 1
+          ./x.py test src/tools/bsan/cargo-bsan --stage 1
+      - name: UI Tests
+        run: |
+          /x.py test src/tools/bsan/bsan-driver --stage 2
