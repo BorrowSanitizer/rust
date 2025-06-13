@@ -4,9 +4,9 @@ This is our fork of the Rust compiler.
 
 Nearly all of BorrowSanitizer can be implemented as an [external plugin](https://github.com/BorrowSanitizer/bsan). However, we still needed to modify the Rust compiler to support lowering [retag statements](https://doc.rust-lang.org/beta/nightly-rustc/rustc_middle/mir/enum.StatementKind.html#variant.Retag) from MIR into special LLVM intrinsics. The BorrowSanitizer plugin converts these intrinsics into calls to our runtime library. 
 
-You can enable LLVM retag intrinsics with both of these unstable flags:
+You can enable LLVM retag intrinsics with an unstable flag:
 ```
--Zmir-emit-retag -Zllvm-emit-retag
+-Zllvm-emit-retag
 ```
 Our LLVM retag intrinsics (`@llvm.retag`) are defined in our [fork of LLVM](https://github.com/BorrowSanitizer/llvm-project). If you want to build the compiler from source, then you will also need to build our fork of LLVM. Make sure to provide the following configuration in [`bootstrap.toml`](https://rustc-dev-guide.rust-lang.org/building/how-to-build-and-run.html#create-a-bootstraptoml).
 ```
