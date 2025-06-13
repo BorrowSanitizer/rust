@@ -159,3 +159,11 @@ jobs:
           run: |
             docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
               $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+              
+        - name: Delete untagged images
+          uses: actions/delete-package-versions@v5
+          with: 
+            package-name: 'rust'
+            package-type: 'container'
+            min-versions-to-keep: 6
+            delete-only-untagged-versions: 'true'
