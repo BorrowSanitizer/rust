@@ -134,7 +134,8 @@ jobs:
           gh release upload \
             rolling/${{ needs.init.outputs.release_name }} \
             $(find . -name "*.tar.xz") \
-            --repo BorrowSanitizer/rust
+            --repo BorrowSanitizer/rust \
+            --clobber
        
       - name: Publish release
         env:
