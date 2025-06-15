@@ -111,7 +111,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete rolling/${{ RELEASE_NAME }} --yes --cleanup-tag
+        run: gh release delete rolling/${{ needs.init.outputs.release_name }} --yes --cleanup-tag
         
       - name: Prepare draft release
         env:
@@ -120,7 +120,7 @@ jobs:
           gh api \
             -X PATCH \
             /repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }} \
-            -f "tag_name=rolling/${{ RELEASE_NAME }}" \
+            -f "tag_name=rolling/${{ needs.init.outputs.release_name }}" \
             -f "target_commitish=${{ needs.init.outputs.rustc_sha }}" \
             -f "name=Rolling Release ${{ needs.init.outputs.release_name }}" \
             -f "body=Rolling release from continuous integration." \
@@ -132,14 +132,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload \
-            rolling/${{ RELEASE_NAME }} \
+            rolling/${{ needs.init.outputs.release_name }} \
             $(find . -name "*.tar.xz") \
             --repo BorrowSanitizer/rust
        
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit rolling/${{ RELEASE_NAME }} --draft=false 
+        run: gh release edit rolling/${{ needs.init.outputs.release_name }} --draft=false 
             
       - name: Delete old rolling releases
         env:
