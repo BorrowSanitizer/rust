@@ -149,7 +149,7 @@ jobs:
           gh release list --limit 10 --json tagName -q '[ .[] \
             | select(.tagName \
             | startswith("rolling")) ] \
-            | .[3:] \
+            | .[12:] \
             | .[] \
             | .tagName \
           ' | while read -r tag; do \
