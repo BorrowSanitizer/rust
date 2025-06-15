@@ -12,7 +12,6 @@ concurrency:
   cancel-in-progress: true
 env:
   prefix: bsan
-  
 jobs:
   init:
     runs-on: ubuntu-latest
@@ -22,12 +21,10 @@ jobs:
         rustc_sha: ${{ steps.info.outputs.RUSTC_SHA }}
         rustc_version: ${{ steps.info.outputs.RUSTC_VERSION }}
         release_name: ${{ steps.info.outputs.RELEASE_NAME }}
-        
     steps:
       - uses: actions/checkout@v4
         with:
           repository: BorrowSanitizer/rust
-          
       - name: Set version info
         id: info
         run: |
@@ -46,7 +43,6 @@ jobs:
         continue-on-error: true
         if: ${{ github.event_name == 'schedule' }}
         run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
-
   build:
     needs: [init]
     strategy:
@@ -62,7 +58,6 @@ jobs:
     runs-on: '${{ matrix.config.os }}'
     name: 'Build (${{ matrix.config.target }})'
     steps:
-
       - uses: actions/checkout@v4
         with:
           repository: BorrowSanitizer/rust
@@ -75,6 +70,7 @@ jobs:
           git config --global --add safe.directory $GITHUB_WORKSPACE
           echo "artifact=${{ env.prefix }}-${{ needs.init.outputs.release_name }}-${{ matrix.config.target }}" >> $GITHUB_OUTPUT
           echo "version_part=${{ needs.init.outputs.rustc_version }}-dev" >> $GITHUB_OUTPUT
+          
       - name: Install dependencies
         run: rustup component add llvm-tools
 
@@ -111,12 +107,12 @@ jobs:
           find . -name "*.zip" -exec unzip -o -d . {} \; 
           find . -name "*.tar.xz"
 
-      - name: Delete current rolling release tag
+      - name: Delete matching rolling release (if it exists)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X DELETE "/repos/BorrowSanitizer/rust/git/refs/tags/rolling"
-
+        run: gh release delete rolling/${{ RELEASE_NAME }} --yes --cleanup-tag
+        
       - name: Prepare draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -124,40 +120,42 @@ jobs:
           gh api \
             -X PATCH \
             /repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }} \
-            -f "tag_name=rolling" \
+            -f "tag_name=rolling/${{ RELEASE_NAME }}" \
             -f "target_commitish=${{ needs.init.outputs.rustc_sha }}" \
             -f "name=Rolling Release ${{ needs.init.outputs.release_name }}" \
             -f "body=Rolling release from continuous integration." \
             -F "draft=true" \
             -F "prerelease=true"
 
-      - name: Delete all existing assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for ASSET in $(gh api /repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }}/assets -q '.[].id'); do
-            echo "Deleting asset $ASSET"
-            gh api -X DELETE "/repos/BorrowSanitizer/rust/releases/assets/$ASSET"
-          done
-
       - name: Upload distribution files
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload \
-            rolling \
+            rolling/${{ RELEASE_NAME }} \
             $(find . -name "*.tar.xz") \
             --repo BorrowSanitizer/rust
        
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api \
-            -X PATCH \
-            "/repos/BorrowSanitizer/rust/releases/${{ vars.RELEASE_ID }}" \
-            -F "draft=false"
+        run: gh release edit rolling/${{ RELEASE_NAME }} --draft=false 
             
+      - name: Delete old rolling releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          run : |
+            gh release list --limit 10 --json tagName -q '[ .[] \
+              | select(.tagName \
+              | startswith("rolling")) ] \
+              | .[3:] \
+              | .[] \
+              | .tagName \
+            ' | while read -r tag; do \
+                  echo "Deleting release $tag." \ 
+                  gh release delete "$tag" --yes --cleanup-tag \
+                done
+                
       - name: Trigger image workflow
         env:
           GH_TOKEN: ${{ github.token }}
