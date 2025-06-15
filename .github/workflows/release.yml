@@ -144,17 +144,17 @@ jobs:
       - name: Delete old rolling releases
         env:
           GH_TOKEN: ${{ github.token }}
-          run : |
-            gh release list --limit 10 --json tagName -q '[ .[] \
-              | select(.tagName \
-              | startswith("rolling")) ] \
-              | .[3:] \
-              | .[] \
-              | .tagName \
-            ' | while read -r tag; do \
-                  echo "Deleting release $tag." \ 
-                  gh release delete "$tag" --yes --cleanup-tag \
-                done
+        run : |
+          gh release list --limit 10 --json tagName -q '[ .[] \
+            | select(.tagName \
+            | startswith("rolling")) ] \
+            | .[3:] \
+            | .[] \
+            | .tagName \
+          ' | while read -r tag; do \
+                echo "Deleting release $tag." \ 
+                gh release delete "$tag" --yes --cleanup-tag \
+              done
                 
       - name: Trigger image workflow
         env:
