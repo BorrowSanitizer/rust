@@ -106,7 +106,7 @@ jobs:
             # URL     - The URL endpoint for artifacts for the rolling release.
             # TARGET  - The current target; e.g. `aarch64-apple-darwin`.
             build-args: |
-              URL=https://github.com/BorrowSanitizer/rust/releases/download/rolling
+              URL=https://github.com/BorrowSanitizer/rust/releases/download/${{ needs.release-info.outputs.tag }}
               TARGET=${{ matrix.config.target }}
               VERSION=${{ env.VERSION }}
 
@@ -153,6 +153,7 @@ jobs:
             tags: |
               type=raw,value=${{ needs.release-info.outputs.tag }}
               type=raw,value=rolling
+              type=sha
               
         - name: Create manifest list and push
           working-directory: ${{ runner.temp }}/digests
