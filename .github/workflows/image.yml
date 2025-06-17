@@ -153,7 +153,7 @@ jobs:
             tags: |
               type=raw,value=${{ needs.release-info.outputs.tag }}
               type=raw,value=rolling
-              type=sha
+              type=raw,value=sha-${{ needs.release-info.outputs.sha }}
               
         - name: Create manifest list and push
           working-directory: ${{ runner.temp }}/digests
