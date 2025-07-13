@@ -9,10 +9,11 @@ use rustc_query_system::query::{DefIdCache, DefaultCache, SingleCache, VecCache}
 use rustc_span::{DUMMY_SP, Ident, Span, Symbol};
 
 use crate::infer::canonical::CanonicalQueryInput;
+use crate::mir::RetagParams;
 use crate::mir::mono::CollectionMode;
 use crate::ty::fast_reject::SimplifiedType;
 use crate::ty::layout::{TyAndLayout, ValidityRequirement};
-use crate::ty::{self, GenericArg, GenericArgsRef, Ty, TyCtxt};
+use crate::ty::{self, GenericArg, GenericArgsRef, Ty, TyCtxt, TypingEnv};
 use crate::{mir, traits};
 
 /// Placeholder for `CrateNum`'s "local" counterpart
@@ -638,5 +639,13 @@ impl<'tcx> Key for (ty::Instance<'tcx>, CollectionMode) {
 
     fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         self.0.default_span(tcx)
+    }
+}
+
+impl<'tcx> Key for (TypingEnv<'tcx>, Ty<'tcx>, Ty<'tcx>, RetagParams) {
+    type Cache<V> = DefaultCache<Self, V>;
+
+    fn default_span(&self, _: TyCtxt<'_>) -> Span {
+        DUMMY_SP
     }
 }

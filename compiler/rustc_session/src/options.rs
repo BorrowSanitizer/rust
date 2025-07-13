@@ -15,8 +15,8 @@ use rustc_span::edition::Edition;
 use rustc_span::{RealFileName, SourceFileHashAlgorithm};
 use rustc_target::spec::{
     CodeModel, FramePointer, LinkerFlavorCli, MergeFunctions, OnBrokenPipe, PanicStrategy,
-    RelocModel, RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, SymbolVisibility,
-    TargetTuple, TlsModel,
+    RelocModel, RelroLevel, RetagFields, RetagMode, SanitizerSet, SplitDebuginfo, StackProtector,
+    SymbolVisibility, TargetTuple, TlsModel,
 };
 
 use crate::config::*;
@@ -879,12 +879,16 @@ mod desc {
     pub(crate) const parse_mir_include_spans: &str =
         "either a boolean (`yes`, `no`, `on`, `off`, etc), or `nll` (default: `nll`)";
     pub(crate) const parse_align: &str = "a number that is a power of 2 between 1 and 2^29";
+    pub(crate) const parse_retag_mode: &str =
+        "either no value or `partial` (the default), or `full`";
+    pub(crate) const parse_retag_fields: &str = "either `all` (the default), `scalar`, or `none`";
 }
 
 pub mod parse {
     use std::str::FromStr;
 
     pub(crate) use super::*;
+    use crate::options::RetagFields;
     pub(crate) const MAX_THREADS_CAP: usize = 256;
 
     /// This is for boolean options that don't take a value, and are true simply
@@ -1725,6 +1729,25 @@ pub mod parse {
         true
     }
 
+    pub(crate) fn parse_retag_mode(slot: &mut Option<RetagMode>, v: Option<&str>) -> bool {
+        *slot = match v {
+            Some("partial") | None => Some(RetagMode::Partial),
+            Some("full") => Some(RetagMode::Full),
+            _ => return false,
+        };
+        true
+    }
+
+    pub(crate) fn parse_retag_fields(slot: &mut RetagFields, v: Option<&str>) -> bool {
+        *slot = match v {
+            Some("all") | None => RetagFields::All,
+            Some("none") => RetagFields::None,
+            Some("scalar") => RetagFields::Scalar,
+            _ => return false,
+        };
+        true
+    }
+
     pub(crate) fn parse_code_model(slot: &mut Option<CodeModel>, v: Option<&str>) -> bool {
         match v.and_then(|s| CodeModel::from_str(s).ok()) {
             Some(code_model) => *slot = Some(code_model),
@@ -2236,6 +2259,8 @@ options! {
         "hash algorithm of source files used to check freshness in cargo (`blake3` or `sha256`)"),
     codegen_backend: Option<String> = (None, parse_opt_string, [TRACKED],
         "the backend to use"),
+    codegen_emit_retag: bool = (false, parse_bool, [TRACKED],
+        "emit retag calls in generated code (default: no)"),
     codegen_source_order: bool = (false, parse_bool, [UNTRACKED],
         "emit mono items in the order of spans in source files (default: no)"),
     contract_checks: Option<bool> = (None, parse_opt_bool, [TRACKED],
@@ -2307,6 +2332,8 @@ options! {
         "emit a section containing stack size metadata (default: no)"),
     emit_thin_lto: bool = (true, parse_bool, [TRACKED],
         "emit the bc module with thin LTO info (default: yes)"),
+    emit_lifetime_markers: bool = (false, parse_bool, [TRACKED],
+        "emit llvm.lifetime.start and llvm.lifetime.end intrinsics (default: no)"),
     emscripten_wasm_eh: bool = (false, parse_bool, [TRACKED],
         "Use WebAssembly error handling for wasm32-unknown-emscripten"),
     enforce_type_length_limit: bool = (false, parse_bool, [TRACKED],
@@ -2436,9 +2463,12 @@ options! {
         "the directory metrics emitted by rustc are dumped into (implicitly enables default set of metrics)"),
     min_function_alignment: Option<Align> = (None, parse_align, [TRACKED],
         "align all functions to at least this many bytes. Must be a power of 2"),
-    mir_emit_retag: bool = (false, parse_bool, [TRACKED],
+    mir_emit_retag: Option<RetagMode> = (None, parse_retag_mode, [TRACKED],
         "emit Retagging MIR statements, interpreted e.g., by miri; implies -Zmir-opt-level=0 \
         (default: no)"),
+    mir_retag_fields: RetagFields = (RetagFields::All, parse_retag_fields, [TRACKED],
+        "emit Retagging MIR statements, interpreted e.g., by miri; implies -Zmir-opt-level=0 \
+        (default: all)"),
     mir_enable_passes: Vec<(String, bool)> = (Vec::new(), parse_list_with_polarity, [TRACKED],
         "use like `-Zmir-enable-passes=+DestinationPropagation,-InstSimplify`. Forces the \
         specified passes to be enabled, overriding all other checks. In particular, this will \
