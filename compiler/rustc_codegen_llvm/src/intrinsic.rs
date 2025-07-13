@@ -11,7 +11,7 @@ use rustc_codegen_ssa::mir::place::{PlaceRef, PlaceValue};
 use rustc_codegen_ssa::traits::*;
 use rustc_hir::def_id::LOCAL_CRATE;
 use rustc_hir::{self as hir};
-use rustc_middle::mir::BinOp;
+use rustc_middle::mir::{BinOp, Local};
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, LayoutOf};
 use rustc_middle::ty::{self, GenericArgsRef, Instance, Ty, TyCtxt, TypingEnv};
 use rustc_middle::{bug, span_bug};
@@ -640,6 +640,51 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
         } else {
             cond
         }
+    }
+
+    fn use_tag(&mut self, pointer: Self::Value, local: Local) {
+        let index = self.const_u32(local.as_u32());
+        self.call_intrinsic(
+            "__bsan_use_tag",
+            &[self.type_ptr(), self.type_i32()],
+            &[pointer, index],
+        );
+    }
+
+    fn retag_operand(
+        &mut self,
+        ptr: Self::Value,
+        size: Size,
+        index: Local,
+        perm: u64,
+        protected: bool,
+    ) {
+        let size = self.const_usize(size.bytes());
+        let index = self.const_u32(index.as_u32());
+        let perm = self.const_u64(perm);
+        let protected = self.const_u8(protected as u8);
+        self.call_intrinsic(
+            "__bsan_retag_operand",
+            &[
+                self.val_ty(ptr),
+                self.val_ty(size),
+                self.type_i32(),
+                self.type_i64(),
+                self.type_i8(),
+            ],
+            &[ptr, size, index, perm, protected],
+        );
+    }
+
+    fn retag_place(&mut self, ptr: Self::Value, size: Size, perm: u64, protected: bool) {
+        let size = self.const_usize(size.bytes());
+        let perm = self.const_u64(perm);
+        let protected = self.const_u8(protected as u8);
+        self.call_intrinsic(
+            "__bsan_retag_place",
+            &[self.val_ty(ptr), self.val_ty(size), self.type_i64(), self.type_i8()],
+            &[ptr, size, perm, protected],
+        );
     }
 
     fn type_checked_load(
