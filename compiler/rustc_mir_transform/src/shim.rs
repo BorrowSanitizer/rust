@@ -15,6 +15,7 @@ use rustc_middle::ty::{
 use rustc_middle::{bug, span_bug};
 use rustc_span::source_map::{Spanned, dummy_spanned};
 use rustc_span::{DUMMY_SP, Span};
+use rustc_target::spec::RetagMode;
 use tracing::{debug, instrument};
 
 use crate::elaborate_drop::{DropElaborator, DropFlagMode, DropStyle, Unwind, elaborate_drop};
@@ -301,16 +302,18 @@ fn dropee_emit_retag<'tcx>(
     mut dropee_ptr: Place<'tcx>,
     span: Span,
 ) -> Place<'tcx> {
-    if tcx.sess.opts.unstable_opts.mir_emit_retag {
+    if let Some(mode) = tcx.sess.opts.unstable_opts.mir_emit_retag {
         let source_info = SourceInfo::outermost(span);
-        // We want to treat the function argument as if it was passed by `&mut`. As such, we
-        // generate
+        // We want to treat the function argument as if it was passed by `&mut`. As such, by
+        // default, we generate
         // ```
         // temp = &mut *arg;
         // Retag(temp, FnEntry)
         // ```
         // It's important that we do this first, before anything that depends on `dropee_ptr`
-        // has been put into the body.
+        // has been put into the body. If our retag mode is `RetagMode::full`, then an
+        // additional retag is inserted before the function-entry retag to register the
+        // reborrow, which would otherwise be handled by Miri.
         let reborrow = Rvalue::Ref(
             tcx.lifetimes.re_erased,
             BorrowKind::Mut { kind: MutBorrowKind::Default },
@@ -318,13 +321,15 @@ fn dropee_emit_retag<'tcx>(
         );
         let ref_ty = reborrow.ty(body.local_decls(), tcx);
         dropee_ptr = body.local_decls.push(LocalDecl::new(ref_ty, span)).into();
-        let new_statements = [
-            StatementKind::Assign(Box::new((dropee_ptr, reborrow))),
-            StatementKind::Retag(RetagKind::FnEntry, Box::new(dropee_ptr)),
-        ];
-        for s in new_statements {
-            body.basic_blocks_mut()[START_BLOCK].statements.push(Statement::new(source_info, s));
-        }
+        let mut push_statement = |kind| {
+            body.basic_blocks_mut()[START_BLOCK].statements.push(Statement::new(source_info, kind));
+        };
+
+        push_statement(StatementKind::Assign(Box::new((dropee_ptr, reborrow))));
+        if matches!(mode, RetagMode::Full) {
+            push_statement(StatementKind::Retag(RetagKind::TwoPhase, Box::new(dropee_ptr)));
+        };
+        push_statement(StatementKind::Retag(RetagKind::FnEntry, Box::new(dropee_ptr)));
     }
     dropee_ptr
 }
