@@ -23,6 +23,8 @@ mod locals;
 pub mod naked_asm;
 pub mod operand;
 pub mod place;
+
+mod retag;
 mod rvalue;
 mod statement;
 
