@@ -114,7 +114,7 @@ declare_passes! {
     mod abort_unwinding_calls : AbortUnwindingCalls;
     mod add_call_guards : AddCallGuards { AllCallEdges, CriticalCallEdges };
     mod add_moves_for_packed_drops : AddMovesForPackedDrops;
-    mod add_retag : AddRetag;
+    pub mod add_retag : AddRetag;
     mod add_subtyping_projections : Subtyper;
     mod check_inline : CheckForceInline;
     mod check_call_recursion : CheckCallRecursion, CheckDropRecursion;

@@ -397,7 +397,8 @@ pub enum StatementKind<'tcx> {
     /// For code that is not specific to stacked borrows, you should consider retags to read and
     /// modify the place in an opaque way.
     ///
-    /// Only `RetagKind::Default` and `RetagKind::FnEntry` are permitted.
+    /// Only `RetagKind::Default` and `RetagKind::FnEntry` are permitted, unless you set
+    /// `-Z mir-emit-retag=full`.
     Retag(RetagKind, Box<Place<'tcx>>),
 
     /// This statement exists to preserve a trace of a scrutinee matched against a wildcard binding.
@@ -519,6 +520,12 @@ pub enum RetagKind {
     Raw,
     /// A "normal" retag.
     Default,
+}
+
+#[derive(Copy, Clone, TyEncodable, TyDecodable, Debug, PartialEq, Eq, Hash, HashStable)]
+pub struct RetagParams {
+    pub kind: RetagKind,
+    pub in_unsafe_cell: bool,
 }
 
 /// The `FakeReadCause` describes the type of pattern why a FakeRead statement exists.
