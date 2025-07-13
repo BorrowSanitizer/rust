@@ -1,3 +1,6 @@
+use std::iter::Peekable;
+use std::slice::Iter;
+
 use rustc_middle::mir::{self, NonDivergingIntrinsic};
 use rustc_middle::span_bug;
 use tracing::instrument;
@@ -7,13 +10,36 @@ use crate::traits::*;
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     #[instrument(level = "debug", skip(self, bx))]
-    pub(crate) fn codegen_statement(&mut self, bx: &mut Bx, statement: &mir::Statement<'tcx>) {
+    pub(crate) fn codegen_statement(
+        &mut self,
+        bx: &mut Bx,
+        statement_iter: &mut Peekable<Iter<'_, mir::Statement<'tcx>>>,
+        statement: &mir::Statement<'tcx>,
+    ) {
         self.set_debug_loc(bx, statement.source_info);
         match statement.kind {
             mir::StatementKind::Assign(box (ref place, ref rvalue)) => {
+                let retag_kind = if let Some(next_statement) = statement_iter.peek()
+                    && let mir::StatementKind::Retag(kind, next_place) = &next_statement.kind
+                {
+                    if next_place.as_ref() != place {
+                        span_bug!(
+                            statement.source_info.span,
+                            "a retag follows this assignment, \
+                            but it involves a different place.",
+                        );
+                    }
+                    let retag_kind = *kind;
+                    statement_iter.next();
+                    Some(retag_kind)
+                } else {
+                    None
+                };
                 if let Some(index) = place.as_local() {
                     match self.locals[index] {
-                        LocalRef::Place(cg_dest) => self.codegen_rvalue(bx, cg_dest, rvalue),
+                        LocalRef::Place(cg_dest) => {
+                            self.codegen_rvalue(bx, place, cg_dest, rvalue, retag_kind)
+                        }
                         LocalRef::UnsizedPlace(cg_indirect_dest) => {
                             let ty = cg_indirect_dest.layout.ty;
                             span_bug!(
@@ -23,9 +49,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                             );
                         }
                         LocalRef::PendingOperand => {
-                            let operand = self.codegen_rvalue_operand(bx, rvalue);
+                            let operand = self.codegen_rvalue_operand(bx, place, rvalue);
                             self.overwrite_local(index, LocalRef::Operand(operand));
                             self.debug_introduce_local(bx, index);
+                            self.codegen_tag_assignment(bx, operand, index, retag_kind);
                         }
                         LocalRef::Operand(op) => {
                             if !op.layout.is_zst() {
@@ -38,12 +65,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
                             // If the type is zero-sized, it's already been set here,
                             // but we still need to make sure we codegen the operand
-                            self.codegen_rvalue_operand(bx, rvalue);
+                            self.codegen_rvalue_operand(bx, place, rvalue);
                         }
                     }
                 } else {
-                    let cg_dest = self.codegen_place(bx, place.as_ref());
-                    self.codegen_rvalue(bx, cg_dest, rvalue);
+                    let cg_dest: crate::mir::place::PlaceRef<'_, <Bx as BackendTypes>::Value> =
+                        self.codegen_place(bx, place.as_ref());
+                    self.codegen_rvalue(bx, place, cg_dest, rvalue, retag_kind);
                 }
             }
             mir::StatementKind::SetDiscriminant { box ref place, variant_index } => {
@@ -92,8 +120,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let src = src_val.immediate();
                 bx.memcpy(dst, align, src, align, bytes, crate::MemFlags::empty());
             }
+            mir::StatementKind::Retag(kind, ref place) => {
+                if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+                    self.codegen_retag(bx, place, kind);
+                }
+            }
             mir::StatementKind::FakeRead(..)
-            | mir::StatementKind::Retag { .. }
             | mir::StatementKind::AscribeUserType(..)
             | mir::StatementKind::ConstEvalCounter
             | mir::StatementKind::PlaceMention(..)

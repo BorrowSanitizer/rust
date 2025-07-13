@@ -4,6 +4,7 @@ use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use rustc_middle::mir::{Body, Local, UnwindTerminateReason, traversal};
+use rustc_middle::ty::data_structures::{IndexMap, IndexSet};
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitableExt};
 use rustc_middle::{bug, mir, span_bug};
@@ -23,6 +24,7 @@ mod locals;
 pub mod naked_asm;
 pub mod operand;
 pub mod place;
+mod retag;
 mod rvalue;
 mod statement;
 
@@ -113,6 +115,14 @@ pub struct FunctionCx<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     /// Avoiding allocs can also be important for certain intrinsics,
     /// notably `expect`.
     locals: locals::Locals<'tcx, Bx::Value>,
+
+    /// The set of local variables representing references or pointers that have
+    /// been retagged or otherwise linked to a borrow tag.
+    tagged_locals: IndexSet<Local>,
+
+    /// Raw pointers cast from references inherit the tag of the reference. Each pointer
+    /// will have a uniquely identifiable tag.
+    tagged_pointers: IndexMap<Local, Local>,
 
     /// All `VarDebugInfo` from the MIR body, partitioned by `Local`.
     /// This is `None` if no variable debuginfo/names are needed.
@@ -230,6 +240,8 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         funclets: IndexVec::from_fn_n(|_| None, mir.basic_blocks.len()),
         cold_blocks: find_cold_blocks(tcx, mir),
         locals: locals::Locals::empty(),
+        tagged_locals: IndexSet::default(),
+        tagged_pointers: IndexMap::default(),
         debug_context,
         per_local_var_debug_info: None,
         caller_location: None,
