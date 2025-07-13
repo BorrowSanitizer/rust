@@ -1,4 +1,5 @@
-use rustc_abi::{self as abi, FIRST_VARIANT};
+use rustc_abi::{self as abi, FIRST_VARIANT, FieldIdx};
+use rustc_middle::mir::{Local, RetagKind, RetagParams};
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt};
@@ -10,6 +11,7 @@ use super::operand::{OperandRef, OperandRefBuilder, OperandValue};
 use super::place::{PlaceRef, PlaceValue, codegen_tag_value};
 use super::{FunctionCx, LocalRef};
 use crate::common::{IntPredicate, TypeKind};
+use crate::mir::retag::Retagable;
 use crate::traits::*;
 use crate::{MemFlags, base};
 
@@ -20,12 +22,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         bx: &mut Bx,
         dest: PlaceRef<'tcx, Bx::Value>,
         rvalue: &mir::Rvalue<'tcx>,
+        retag_config: Option<(Local, RetagKind)>,
     ) {
         match *rvalue {
             mir::Rvalue::Use(ref operand) => {
                 let cg_operand = self.codegen_operand(bx, operand);
                 // FIXME: consider not copying constants through stack. (Fixable by codegen'ing
                 // constants into `OperandValue::Ref`; why don’t we do that yet if we don’t?)
+                retag_config.map(|(index, kind)| {
+                    self.codegen_retag_operand(bx, cg_operand, index, kind);
+                });
                 cg_operand.val.store(bx, dest);
             }
 
@@ -40,6 +46,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     // Into-coerce of a thin pointer to a wide pointer -- just
                     // use the operand path.
                     let temp = self.codegen_rvalue_operand(bx, rvalue);
+                    retag_config.map(|(index, kind)| {
+                        self.codegen_retag_operand(bx, temp, index, kind);
+                    });
                     temp.val.store(bx, dest);
                     return;
                 }
@@ -49,6 +58,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 // `CoerceUnsized` can be passed by a where-clause,
                 // so the (generic) MIR may not be able to expand it.
                 let operand = self.codegen_operand(bx, source);
+                retag_config.map(|(index, kind)| {
+                    self.codegen_retag_operand(bx, operand, index, kind);
+                });
                 match operand.val {
                     OperandValue::Pair(..) | OperandValue::Immediate(_) => {
                         // Unsize from an immediate structure. We don't
@@ -78,6 +90,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
             mir::Rvalue::Cast(mir::CastKind::Transmute, ref operand, _ty) => {
                 let src = self.codegen_operand(bx, operand);
+                retag_config.map(|(index, kind)| {
+                    self.codegen_retag_operand(bx, src, index, kind);
+                });
                 self.codegen_transmute(bx, src, dest);
             }
 
@@ -105,7 +120,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
 
                 let cg_elem = self.codegen_operand(bx, elem);
-
+                retag_config.map(|(index, kind)| {
+                    self.codegen_retag_operand(bx, cg_elem, index, kind);
+                });
                 let try_init_all_same = |bx: &mut Bx, v| {
                     let start = dest.val.llval;
                     let size = bx.const_usize(dest.layout.size.bytes());
@@ -162,8 +179,39 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 if active_field_index.is_some() {
                     assert_eq!(operands.len(), 1);
                 }
+
+                let rvalue_ty = rvalue.ty(self.mir, bx.tcx());
+                let rvalue_ty = self.monomorphize(rvalue_ty);
+
                 for (i, operand) in operands.iter_enumerated() {
                     let op = self.codegen_operand(bx, operand);
+                    if i == FieldIdx::ZERO
+                        && rvalue_ty.is_box_global(bx.tcx())
+                        && let Some(pointee_ty) = rvalue_ty.boxed_ty()
+                    {
+                        let pointee_layout = bx.layout_of(pointee_ty);
+                        retag_config.map(|(index, kind)| {
+                            let params = RetagParams { kind, in_unsafe_cell: false };
+                            if let Some(perm) = bx.tcx().retag_perm((
+                                bx.typing_env(),
+                                rvalue_ty,
+                                pointee_layout.ty,
+                                params,
+                            )) {
+                                op.retag(
+                                    bx,
+                                    pointee_layout,
+                                    index,
+                                    perm,
+                                    kind == RetagKind::FnEntry,
+                                );
+                            }
+                        });
+                    } else {
+                        retag_config.map(|(index, kind)| {
+                            self.codegen_retag_operand(bx, op, index, kind);
+                        });
+                    }
                     // Do not generate stores and GEPis for zero-sized fields.
                     if !op.layout.is_zst() {
                         let field_index = active_field_index.unwrap_or(i);
@@ -181,6 +229,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
             _ => {
                 let temp = self.codegen_rvalue_operand(bx, rvalue);
+                retag_config.map(|(index, kind)| {
+                    self.codegen_retag_operand(bx, temp, index, kind);
+                });
                 temp.val.store(bx, dest);
             }
         }
