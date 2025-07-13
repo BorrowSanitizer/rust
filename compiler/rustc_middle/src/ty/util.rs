@@ -22,7 +22,7 @@ use tracing::{debug, instrument};
 
 use super::TypingEnv;
 use crate::middle::codegen_fn_attrs::CodegenFnAttrFlags;
-use crate::mir;
+use crate::mir::{self, RetagParams};
 use crate::query::Providers;
 use crate::traits::ObligationCause;
 use crate::ty::layout::{FloatExt, IntegerExt};
@@ -1699,12 +1699,24 @@ pub fn intrinsic_raw(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<ty::Intrinsi
     }
 }
 
+/// Determines the permission required for retagging a type with the given `RetagParams`.
+///
+/// By default, this returns `None`, which causes all retags to become noops during codegen.
+/// Third-party plugins need to override this query.
+pub fn retag_perm<'tcx>(
+    _tcx: TyCtxt<'tcx>,
+    _key: (TypingEnv<'tcx>, Ty<'tcx>, Ty<'tcx>, RetagParams),
+) -> Option<u64> {
+    None
+}
+
 pub fn provide(providers: &mut Providers) {
     *providers = Providers {
         reveal_opaque_types_in_bounds,
         is_doc_hidden,
         is_doc_notable_trait,
         intrinsic_raw,
+        retag_perm,
         ..*providers
     }
 }

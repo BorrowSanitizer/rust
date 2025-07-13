@@ -641,6 +641,34 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
         }
     }
 
+    fn retag_operand(
+        &mut self,
+        ptr: Self::Value,
+        size: Size,
+        perm: u64,
+        protected: bool,
+    ) -> Self::Value {
+        let size = self.const_usize(size.bytes());
+        let perm = self.const_u64(perm);
+        let protected = self.const_u8(protected as u8);
+        self.call_intrinsic(
+            "__bsan_retag_operand",
+            &[self.val_ty(ptr), self.val_ty(size), self.type_i64(), self.type_i8()],
+            &[ptr, size, perm, protected],
+        )
+    }
+
+    fn retag_place(&mut self, ptr: Self::Value, size: Size, perm: u64, protected: bool) {
+        let size = self.const_usize(size.bytes());
+        let perm = self.const_u64(perm);
+        let protected = self.const_u8(protected as u8);
+        self.call_intrinsic(
+            "__bsan_retag_place",
+            &[self.val_ty(ptr), self.val_ty(size), self.type_i64(), self.type_i8()],
+            &[ptr, size, perm, protected],
+        );
+    }
+
     fn type_checked_load(
         &mut self,
         llvtable: &'ll Value,

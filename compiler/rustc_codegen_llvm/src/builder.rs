@@ -399,6 +399,18 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         self.cx.set_metadata_node(switch, llvm::MD_prof, &md);
     }
 
+    fn phi(
+        &mut self,
+        ty: &'ll Type,
+        cases: impl ExactSizeIterator<Item = (Self::BasicBlock, Self::Value)>,
+    ) -> Self::Value {
+        let phi = unsafe { llvm::LLVMBuildPhi(self.llbuilder, ty, UNNAMED) };
+        for (bb, value) in cases {
+            self.add_incoming_to_phi(phi, value, bb);
+        }
+        phi
+    }
+
     fn invoke(
         &mut self,
         llty: &'ll Type,

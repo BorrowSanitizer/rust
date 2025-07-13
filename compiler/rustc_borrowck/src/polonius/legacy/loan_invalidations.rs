@@ -72,7 +72,8 @@ impl<'a, 'tcx> Visitor<'tcx> for LoanInvalidationsGenerator<'a, 'tcx> {
             // Doesn't have any language semantics
             | StatementKind::Coverage(..)
             // Does not actually affect borrowck
-            | StatementKind::StorageLive(..) => {}
+            | StatementKind::StorageLive(..)
+            | StatementKind::Retag { .. } => {},
             StatementKind::StorageDead(local) => {
                 self.access_place(
                     location,
@@ -83,7 +84,6 @@ impl<'a, 'tcx> Visitor<'tcx> for LoanInvalidationsGenerator<'a, 'tcx> {
             }
             StatementKind::ConstEvalCounter
             | StatementKind::Nop
-            | StatementKind::Retag { .. }
             | StatementKind::Deinit(..)
             | StatementKind::BackwardIncompatibleDropHint { .. }
             | StatementKind::SetDiscriminant { .. } => {
