@@ -3234,8 +3234,8 @@ pub(crate) mod dep_tracking {
     use rustc_span::edition::Edition;
     use rustc_target::spec::{
         CodeModel, FramePointer, MergeFunctions, OnBrokenPipe, PanicStrategy, RelocModel,
-        RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, SymbolVisibility, TargetTuple,
-        TlsModel,
+        RelroLevel, RetagFields, RetagMode, SanitizerSet, SplitDebuginfo, StackProtector,
+        SymbolVisibility, TargetTuple, TlsModel,
     };
 
     use super::{
@@ -3349,6 +3349,8 @@ pub(crate) mod dep_tracking {
         InliningThreshold,
         FunctionReturn,
         Align,
+        RetagMode,
+        RetagFields
     );
 
     impl<T1, T2> DepTrackingHash for (T1, T2)

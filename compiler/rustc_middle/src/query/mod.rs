@@ -2728,6 +2728,10 @@ rustc_queries! {
         desc { |tcx| "checking what set of sanitizers are enabled on `{}`", tcx.def_path_str(key) }
         feedable
     }
+
+    query retag_perm(key: (ty::TypingEnv<'tcx>, Ty<'tcx>, Option<mir::Mutability>, mir::RetagKind)) -> Option<u64> {
+        desc { |tcx| "computing the permission for retagging" }
+    }
 }
 
 rustc_with_all_queries! { define_callbacks! }
