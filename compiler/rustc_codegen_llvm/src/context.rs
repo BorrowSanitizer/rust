@@ -907,6 +907,17 @@ impl<'ll> CodegenCx<'ll, '_> {
             return (fn_ty, f);
         }
 
+        if base_name.starts_with("__bsan") {
+            let return_ty = if base_name == "__bsan_retag_operand" {
+                self.type_ptr()
+            } else {
+                self.type_void()
+            };
+            let fn_ty = self.type_func(type_params, return_ty);
+            let f = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
+            return (fn_ty, f);
+        }
+
         let intrinsic = llvm::Intrinsic::lookup(base_name.as_bytes())
             .unwrap_or_else(|| bug!("Unknown intrinsic: `{base_name}`"));
         let f = intrinsic.get_declaration(self.llmod, &type_params);
