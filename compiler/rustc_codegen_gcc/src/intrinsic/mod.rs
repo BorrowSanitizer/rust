@@ -9,7 +9,7 @@ use gccjit::Type;
 use gccjit::{ComparisonOp, Function, FunctionType, RValue, ToRValue, UnaryOp};
 #[cfg(feature = "master")]
 use rustc_abi::ExternAbi;
-use rustc_abi::{BackendRepr, HasDataLayout};
+use rustc_abi::{BackendRepr, HasDataLayout, Size};
 use rustc_codegen_ssa::MemFlags;
 use rustc_codegen_ssa::base::wants_msvc_seh;
 use rustc_codegen_ssa::common::IntPredicate;
@@ -23,6 +23,7 @@ use rustc_codegen_ssa::traits::{
     IntrinsicCallBuilderMethods,
 };
 use rustc_middle::bug;
+use rustc_middle::mir::Local;
 #[cfg(feature = "master")]
 use rustc_middle::ty::layout::FnAbiOf;
 use rustc_middle::ty::layout::LayoutOf;
@@ -657,6 +658,29 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
     fn expect(&mut self, cond: Self::Value, _expected: bool) -> Self::Value {
         // TODO(antoyo)
         cond
+    }
+
+    fn link_tag(&mut self, _pointer: Self::Value, _local: Local) {
+        unimplemented!()
+    }
+
+    fn consume_tag(&mut self, _pointer: Self::Value, _local: Local) {
+        unimplemented!()
+    }
+
+    fn retag_operand(
+        &mut self,
+        _ptr: Self::Value,
+        _size: Size,
+        _index: Local,
+        _perm: u64,
+        _protected: bool,
+    ) {
+        unimplemented!()
+    }
+
+    fn retag_place(&mut self, _ptr: Self::Value, _size: Size, _perm: u64, _protected: bool) {
+        unimplemented!()
     }
 
     fn type_checked_load(

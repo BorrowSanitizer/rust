@@ -1,4 +1,5 @@
-use rustc_abi::{self as abi, FIRST_VARIANT};
+use rustc_abi::{self as abi, FIRST_VARIANT, FieldIdx};
+use rustc_middle::mir::RetagKind;
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt};
@@ -10,6 +11,7 @@ use super::operand::{OperandRef, OperandRefBuilder, OperandValue};
 use super::place::{PlaceRef, PlaceValue, codegen_tag_value};
 use super::{FunctionCx, LocalRef};
 use crate::common::{IntPredicate, TypeKind};
+use crate::mir::retag::Retagable;
 use crate::traits::*;
 use crate::{MemFlags, base};
 
@@ -18,14 +20,17 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     pub(crate) fn codegen_rvalue(
         &mut self,
         bx: &mut Bx,
+        dest_place: &mir::Place<'tcx>,
         dest: PlaceRef<'tcx, Bx::Value>,
         rvalue: &mir::Rvalue<'tcx>,
+        retag_kind: Option<RetagKind>,
     ) {
         match *rvalue {
             mir::Rvalue::Use(ref operand) => {
                 let cg_operand = self.codegen_operand(bx, operand);
                 // FIXME: consider not copying constants through stack. (Fixable by codegen'ing
                 // constants into `OperandValue::Ref`; why don’t we do that yet if we don’t?)
+                self.codegen_tag_assignment(bx, cg_operand, dest_place.local, retag_kind);
                 cg_operand.val.store(bx, dest);
             }
 
@@ -39,7 +44,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 if bx.cx().is_backend_scalar_pair(dest.layout) {
                     // Into-coerce of a thin pointer to a wide pointer -- just
                     // use the operand path.
-                    let temp = self.codegen_rvalue_operand(bx, rvalue);
+                    let temp = self.codegen_rvalue_operand(bx, dest_place, rvalue);
+                    self.codegen_tag_assignment(bx, temp, dest_place.local, retag_kind);
                     temp.val.store(bx, dest);
                     return;
                 }
@@ -49,6 +55,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 // `CoerceUnsized` can be passed by a where-clause,
                 // so the (generic) MIR may not be able to expand it.
                 let operand = self.codegen_operand(bx, source);
+                self.codegen_tag_assignment(bx, operand, dest_place.local, retag_kind);
                 match operand.val {
                     OperandValue::Pair(..) | OperandValue::Immediate(_) => {
                         // Unsize from an immediate structure. We don't
@@ -78,6 +85,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
             mir::Rvalue::Cast(mir::CastKind::Transmute, ref operand, _ty) => {
                 let src = self.codegen_operand(bx, operand);
+                self.codegen_tag_assignment(bx, src, dest_place.local, retag_kind);
                 self.codegen_transmute(bx, src, dest);
             }
 
@@ -105,7 +113,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
 
                 let cg_elem = self.codegen_operand(bx, elem);
-
+                self.codegen_tag_assignment(bx, cg_elem, dest_place.local, retag_kind);
                 let try_init_all_same = |bx: &mut Bx, v| {
                     let start = dest.val.llval;
                     let size = bx.const_usize(dest.layout.size.bytes());
@@ -162,8 +170,23 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 if active_field_index.is_some() {
                     assert_eq!(operands.len(), 1);
                 }
+
+                let rvalue_ty = rvalue.ty(self.mir, bx.tcx());
+                let rvalue_ty = self.monomorphize(rvalue_ty);
+
                 for (i, operand) in operands.iter_enumerated() {
                     let op = self.codegen_operand(bx, operand);
+                    if i == FieldIdx::ZERO && rvalue_ty.is_box() {
+                        self.codegen_tag_assignment_for_box(
+                            bx,
+                            rvalue_ty,
+                            op,
+                            dest_place.local,
+                            retag_kind,
+                        );
+                    } else {
+                        self.codegen_tag_assignment(bx, op, dest_place.local, retag_kind);
+                    }
                     // Do not generate stores and GEPis for zero-sized fields.
                     if !op.layout.is_zst() {
                         let field_index = active_field_index.unwrap_or(i);
@@ -180,7 +203,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             }
 
             _ => {
-                let temp = self.codegen_rvalue_operand(bx, rvalue);
+                let temp = self.codegen_rvalue_operand(bx, dest_place, rvalue);
+                self.codegen_tag_assignment(bx, temp, dest_place.local, retag_kind);
                 temp.val.store(bx, dest);
             }
         }
@@ -373,6 +397,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     pub(crate) fn codegen_rvalue_operand(
         &mut self,
         bx: &mut Bx,
+        dest: &mir::Place<'tcx>,
         rvalue: &mir::Rvalue<'tcx>,
     ) -> OperandRef<'tcx, Bx::Value> {
         match *rvalue {
@@ -501,7 +526,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let mk_ptr = move |tcx: TyCtxt<'tcx>, ty: Ty<'tcx>| {
                     Ty::new_ptr(tcx, ty, kind.to_mutbl_lossy())
                 };
-                self.codegen_place_to_pointer(bx, place, mk_ptr)
+                let operand = self.codegen_place_to_pointer(bx, place, mk_ptr);
+                if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+                    let (pointer, _) = operand.val.pointer_parts();
+                    bx.link_tag(pointer, dest.local);
+                    self.tagged_locals.insert(dest.local);
+                }
+                operand
             }
 
             mir::Rvalue::Len(place) => {

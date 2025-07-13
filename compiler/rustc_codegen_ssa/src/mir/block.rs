@@ -1317,8 +1317,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
 
             debug!("codegen_block({:?}={:?})", bb, data);
 
-            for statement in &data.statements {
-                self.codegen_statement(bx, statement);
+            let mut statement_iter = data.statements.iter().peekable();
+            while let Some(statement) = statement_iter.next() {
+                // When we encounter an assignment, if it is followed by
+                // a retag, then we emit the retag as part of the process for
+                // emitting the assignment. A mutable reference to the iterator
+                // allows us to skip visiting the retag again.
+                self.codegen_statement(bx, &mut statement_iter, statement);
             }
 
             let merging_succ = self.codegen_terminator(bx, bb, data.terminator());
