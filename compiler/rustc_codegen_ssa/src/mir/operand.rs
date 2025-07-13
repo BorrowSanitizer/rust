@@ -993,14 +993,20 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             return OperandRef::zero_sized(layout);
         }
 
-        if let Some(o) = self.maybe_codegen_consume_direct(bx, place_ref) {
-            return o;
-        }
+        let operand = self.maybe_codegen_consume_direct(bx, place_ref).unwrap_or_else(|| {
+            // for most places, to consume them we just load them
+            // out from their home
+            let place = self.codegen_place(bx, place_ref);
+            bx.load_operand(place)
+        });
 
-        // for most places, to consume them we just load them
-        // out from their home
-        let place = self.codegen_place(bx, place_ref);
-        bx.load_operand(place)
+        if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+            if ty.is_any_ptr() {
+                let pointer_value = operand.val.pointer_parts().0;
+                bx.consume_tag(pointer_value, place_ref.local);
+            }
+        }
+        operand
     }
 
     pub fn codegen_operand(

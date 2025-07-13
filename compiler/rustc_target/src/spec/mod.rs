@@ -911,6 +911,43 @@ impl RelroLevel {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Hash)]
+pub enum RetagMode {
+    /// Emit retags everywhere—even for reborrowing
+    Full,
+    /// Only emit retags where Miri needs them
+    Partial,
+}
+
+impl RetagMode {
+    pub fn desc(&self) -> &str {
+        match *self {
+            RetagMode::Full => "full",
+            RetagMode::Partial => "partial",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+pub enum RetagFields {
+    /// Recursively retag fields
+    All,
+    /// Do not recurse into fields
+    None,
+    /// Only recurse into fields with a Scalar ABI
+    Scalar,
+}
+
+impl RetagFields {
+    pub fn desc(&self) -> &str {
+        match *self {
+            RetagFields::All => "all",
+            RetagFields::None => "none",
+            RetagFields::Scalar => "scalar",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
 pub enum SymbolVisibility {
     Hidden,
     Protected,
