@@ -1000,7 +1000,17 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         // for most places, to consume them we just load them
         // out from their home
         let place = self.codegen_place(bx, place_ref);
-        bx.load_operand(place)
+        let operand = bx.load_operand(place);
+
+        if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+            if ty.is_any_ptr() {
+                if self.retagged_locals.contains(&place_ref.local) {
+                    let pointer_value = operand.val.pointer_parts().0;
+                    bx.consume_tag(pointer_value, place_ref.local);
+                }
+            }
+        }
+        operand
     }
 
     pub fn codegen_operand(

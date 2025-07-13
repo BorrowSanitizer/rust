@@ -6,6 +6,7 @@
 
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, Ty, TyCtxt};
+use rustc_target::spec::RetagMode;
 
 pub(super) struct AddRetag;
 
@@ -48,13 +49,15 @@ fn may_contain_reference<'tcx>(ty: Ty<'tcx>, depth: u32, tcx: TyCtxt<'tcx>) -> b
 
 impl<'tcx> crate::MirPass<'tcx> for AddRetag {
     fn is_enabled(&self, sess: &rustc_session::Session) -> bool {
-        sess.opts.unstable_opts.mir_emit_retag
+        sess.opts.unstable_opts.mir_emit_retag.is_some()
     }
 
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         // We need an `AllCallEdges` pass before we can do any work.
         super::add_call_guards::AllCallEdges.run_pass(tcx, body);
 
+        let retag_mode =
+            tcx.sess.opts.unstable_opts.mir_emit_retag.expect("A retag mode should be present.");
         let basic_blocks = body.basic_blocks.as_mut();
         let local_decls = &body.local_decls;
         let needs_retag = |place: &Place<'tcx>| {
@@ -152,7 +155,17 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
                                     None
                                 }
                             }
-                            Rvalue::Ref(..) => None,
+                            Rvalue::Ref(_, borrow_kind, _) => {
+                                if matches!(retag_mode, RetagMode::Full) {
+                                    if borrow_kind.allows_two_phase_borrow() {
+                                        Some(RetagKind::TwoPhase)
+                                    } else {
+                                        Some(RetagKind::Default)
+                                    }
+                                } else {
+                                    None
+                                }
+                            }
                             _ => {
                                 if needs_retag(place) {
                                     Some(RetagKind::Default)

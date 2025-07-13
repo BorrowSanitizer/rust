@@ -113,6 +113,7 @@ use crate::middle::lib_features::LibFeatures;
 use crate::middle::privacy::EffectiveVisibilities;
 use crate::middle::resolve_bound_vars::{ObjectLifetimeDefault, ResolveBoundVars, ResolvedArg};
 use crate::middle::stability::DeprecationEntry;
+use crate::mir::RetagParams;
 use crate::mir::interpret::{
     EvalStaticInitializerRawResult, EvalToAllocationRawResult, EvalToConstValueResult,
     EvalToValTreeResult, GlobalId, LitToConstInput,
@@ -2726,6 +2727,10 @@ rustc_queries! {
     query disabled_sanitizers_for(key: LocalDefId) -> SanitizerSet {
         desc { |tcx| "checking what set of sanitizers are enabled on `{}`", tcx.def_path_str(key) }
         feedable
+    }
+
+    query retag_perm(key: (ty::TypingEnv<'tcx>, ty::Ty<'tcx>, ty::Ty<'tcx>, RetagParams)) -> Option<u64> {
+        desc { |tcx| "computing the permission for retagging" }
     }
 }
 

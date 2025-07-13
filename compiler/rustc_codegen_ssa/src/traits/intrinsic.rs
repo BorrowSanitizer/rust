@@ -1,3 +1,5 @@
+use rustc_abi::Size;
+use rustc_middle::mir::Local;
 use rustc_middle::ty;
 use rustc_span::Span;
 
@@ -24,7 +26,6 @@ pub trait IntrinsicCallBuilderMethods<'tcx>: BackendTypes {
         result_dest: PlaceRef<'tcx, Self::Value>,
         span: Span,
     ) -> Result<(), ty::Instance<'tcx>>;
-
     fn abort(&mut self);
     fn assume(&mut self, val: Self::Value);
     fn expect(&mut self, cond: Self::Value, expected: bool) -> Self::Value;
@@ -36,8 +37,9 @@ pub trait IntrinsicCallBuilderMethods<'tcx>: BackendTypes {
         vtable_byte_offset: u64,
         typeid: Self::Metadata,
     ) -> Self::Value;
-    /// Trait method used to inject `va_start` on the "spoofed" `VaListImpl` in
-    /// Rust defined C-variadic functions.
+    /// Trait method used to indicate the start of the lifetime of a reference.
+    fn retag(&mut self, place: Self::Value, size: Size, local: Local, perm: u64, protected: bool);
+    fn consume_tag(&mut self, place: Self::Value, local: Local);
     fn va_start(&mut self, val: Self::Value) -> Self::Value;
     /// Trait method used to inject `va_end` on the "spoofed" `VaListImpl` before
     /// Rust defined C-variadic functions return.

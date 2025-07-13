@@ -42,7 +42,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         }
                     }
                 } else {
-                    let cg_dest = self.codegen_place(bx, place.as_ref());
+                    let cg_dest: crate::mir::place::PlaceRef<'_, <Bx as BackendTypes>::Value> =
+                        self.codegen_place(bx, place.as_ref());
                     self.codegen_rvalue(bx, cg_dest, rvalue);
                 }
             }
@@ -92,8 +93,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let src = src_val.immediate();
                 bx.memcpy(dst, align, src, align, bytes, crate::MemFlags::empty());
             }
+            mir::StatementKind::Retag(kind, ref place) => {
+                if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+                    self.codegen_retag(bx, place, kind);
+                }
+            }
             mir::StatementKind::FakeRead(..)
-            | mir::StatementKind::Retag { .. }
             | mir::StatementKind::AscribeUserType(..)
             | mir::StatementKind::ConstEvalCounter
             | mir::StatementKind::PlaceMention(..)

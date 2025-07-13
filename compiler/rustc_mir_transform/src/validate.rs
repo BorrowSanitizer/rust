@@ -17,6 +17,7 @@ use rustc_middle::ty::{
     self, CoroutineArgsExt, InstanceKind, ScalarInt, Ty, TyCtxt, TypeVisitableExt, Upcast, Variance,
 };
 use rustc_middle::{bug, span_bug};
+use rustc_target::spec::RetagMode;
 use rustc_trait_selection::traits::ObligationCtxt;
 
 use crate::util::{self, is_within_packed};
@@ -322,7 +323,10 @@ impl<'a, 'tcx> Visitor<'tcx> for CfgChecker<'a, 'tcx> {
                 // FIXME(JakobDegen) The validator should check that `self.body.phase <
                 // DropsLowered`. However, this causes ICEs with generation of drop shims, which
                 // seem to fail to set their `MirPhase` correctly.
-                if matches!(kind, RetagKind::TwoPhase) {
+                if matches!(kind, RetagKind::TwoPhase)
+                    && let Some(RetagMode::Partial) =
+                        self.tcx.sess.opts.unstable_opts.mir_emit_retag
+                {
                     self.fail(location, format!("explicit `{kind:?}` is forbidden"));
                 }
             }
@@ -1526,7 +1530,10 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                 // FIXME(JakobDegen) The validator should check that `self.body.phase <
                 // DropsLowered`. However, this causes ICEs with generation of drop shims, which
                 // seem to fail to set their `MirPhase` correctly.
-                if matches!(kind, RetagKind::TwoPhase) {
+                if matches!(kind, RetagKind::TwoPhase)
+                    && let Some(RetagMode::Partial) =
+                        self.tcx.sess.opts.unstable_opts.mir_emit_retag
+                {
                     self.fail(location, format!("explicit `{kind:?}` is forbidden"));
                 }
             }
