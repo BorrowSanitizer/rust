@@ -841,7 +841,8 @@ impl<'a, 'tcx> ResultsVisitor<'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<'a, 
             | StatementKind::Coverage(..)
             // These do not actually affect borrowck
             | StatementKind::ConstEvalCounter
-            | StatementKind::StorageLive(..) => {}
+            | StatementKind::StorageLive(..)
+            | StatementKind::Retag { .. } => {}
             // This does not affect borrowck
             StatementKind::BackwardIncompatibleDropHint { place, reason: BackwardIncompatibleDropReason::Edition2024 } => {
                 self.check_backward_incompatible_drop(location, **place, state);
@@ -856,7 +857,6 @@ impl<'a, 'tcx> ResultsVisitor<'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<'a, 
                 );
             }
             StatementKind::Nop
-            | StatementKind::Retag { .. }
             | StatementKind::Deinit(..)
             | StatementKind::SetDiscriminant { .. } => {
                 bug!("Statement not allowed in this MIR phase")

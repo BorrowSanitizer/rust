@@ -1813,6 +1813,14 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     fn fptosi_sat(&mut self, val: RValue<'gcc>, dest_ty: Type<'gcc>) -> RValue<'gcc> {
         self.fptoint_sat(true, val, dest_ty)
     }
+
+    fn phi(
+        &mut self,
+        _ty: Type<'gcc>,
+        _cases: impl ExactSizeIterator<Item = (Self::BasicBlock, Self::Value)>,
+    ) -> Self::Value {
+        unimplemented!();
+    }
 }
 
 impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {

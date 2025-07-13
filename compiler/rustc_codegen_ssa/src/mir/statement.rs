@@ -92,8 +92,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let src = src_val.immediate();
                 bx.memcpy(dst, align, src, align, bytes, crate::MemFlags::empty());
             }
+            mir::StatementKind::Retag(kind, ref place) => {
+                self.codegen_retag(bx, place, kind);
+                /*if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+                    self.codegen_retag(bx, place, kind);
+                }*/
+            }
             mir::StatementKind::FakeRead(..)
-            | mir::StatementKind::Retag { .. }
             | mir::StatementKind::AscribeUserType(..)
             | mir::StatementKind::ConstEvalCounter
             | mir::StatementKind::PlaceMention(..)
