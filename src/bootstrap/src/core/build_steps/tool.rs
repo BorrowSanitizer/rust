@@ -1540,6 +1540,18 @@ tool_rustc_extended!(Rustfmt {
     stable: true,
     add_bins_to_sysroot: ["rustfmt"]
 });
+tool_rustc_extended!(CargoBsan {
+    path: "src/tools/bsan/cargo-bsan",
+    tool_name: "cargo-bsan",
+    stable: false,
+    add_bins_to_sysroot: ["cargo-bsan"]
+});
+tool_rustc_extended!(BsanDriver {
+    path: "src/tools/bsan/bsan-driver/",
+    tool_name: "bsan-driver",
+    stable: false,
+    add_bins_to_sysroot: ["bsan-driver"]
+});
 
 pub const TEST_FLOAT_PARSE_ALLOW_FEATURES: &str = "f16,cfg_target_has_reliable_f16_f128";
 
