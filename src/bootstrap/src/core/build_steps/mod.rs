@@ -1,3 +1,4 @@
+pub(crate) mod borsan;
 pub(crate) mod check;
 pub(crate) mod clean;
 pub(crate) mod clippy;
