@@ -445,6 +445,11 @@ impl Builder<'_> {
                 cargo.arg("miri").arg("test");
                 cargo
             }
+            Kind::BsanSetup => {
+                let mut cargo = self.cargo_bsan_cmd(compiler);
+                cargo.arg("bsan").arg("setup");
+                cargo
+            }
             _ => {
                 let mut cargo = command(&self.initial_cargo);
                 cargo.arg(cmd_kind.as_str());
