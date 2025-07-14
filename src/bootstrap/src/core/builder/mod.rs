@@ -665,6 +665,7 @@ pub enum Kind {
     Miri,
     MiriSetup,
     MiriTest,
+    BsanSetup,
     Bench,
     #[value(alias = "d")]
     Doc,
@@ -690,6 +691,7 @@ impl Kind {
             Kind::Miri => "miri",
             Kind::MiriSetup => panic!("`as_str` is not supported for `Kind::MiriSetup`."),
             Kind::MiriTest => panic!("`as_str` is not supported for `Kind::MiriTest`."),
+            Kind::BsanSetup => panic!("`as_str` is not supported for `Kind::BsanSetup`."),
             Kind::Bench => "bench",
             Kind::Doc => "doc",
             Kind::Clean => "clean",
@@ -810,6 +812,8 @@ impl<'a> Builder<'a> {
                 tool::Cargofmt,
                 tool::Miri,
                 tool::CargoMiri,
+                tool::CargoBsan,
+                tool::BsanDriver,
                 llvm::Lld,
                 llvm::Enzyme,
                 llvm::CrtBeginEnd,
@@ -924,6 +928,8 @@ impl<'a> Builder<'a> {
                 test::Rustfmt,
                 test::Miri,
                 test::CargoMiri,
+                test::BsanDriver,
+                test::BsanRT,
                 test::Clippy,
                 test::CompiletestTest,
                 test::CrateRunMakeSupport,
@@ -1045,6 +1051,7 @@ impl<'a> Builder<'a> {
             // special-cased in Build::build()
             Kind::Format | Kind::Perf => vec![],
             Kind::MiriTest | Kind::MiriSetup => unreachable!(),
+            Kind::BsanSetup => unreachable!(),
         }
     }
 
@@ -1482,6 +1489,34 @@ Alternatively, you can set `build.local-rebuild=true` and use a stage0 compiler 
         let mut cmd = command(cargo_clippy.tool_path);
         cmd.env(helpers::dylib_path_var(), env::join_paths(&dylib_path).unwrap());
         cmd.env("CARGO", &self.initial_cargo);
+        cmd
+    }
+
+    pub fn cargo_bsan_cmd(&self, run_compiler: Compiler) -> BootstrapCommand {
+        assert!(run_compiler.stage > 0, "miri can not be invoked at stage 0");
+
+        let compilers =
+            RustcPrivateCompilers::new(self, run_compiler.stage, self.build.host_target);
+        assert_eq!(run_compiler, compilers.target_compiler());
+
+        // Prepare the tools
+        let bsan = self.ensure(tool::BsanDriver::from_compilers(compilers));
+        let cargo_bsan = self.ensure(tool::CargoBsan::from_compilers(compilers));
+
+        // Invoke cargo-miri, make sure it can find miri and cargo.
+        let mut cmd: BootstrapCommand = command(cargo_bsan.tool_path);
+        cmd.env("BSAN_DRIVER", &bsan.tool_path);
+        cmd.env("CARGO", &self.initial_cargo);
+
+        // Need to add the `run_compiler` libs. Those are the libs produces *by* `build_compiler`
+        // in `tool::ToolBuild` step, so they match the Miri we just built. However this means they
+        // are actually living one stage up, i.e. we are running `stage1-tools-bin/miri` with the
+        // libraries in `stage1/lib`. This is an unfortunate off-by-1 caused (possibly) by the fact
+        // that Miri doesn't have an "assemble" step like rustc does that would cross the stage boundary.
+        // We can't use `add_rustc_lib_path` as that's a NOP on Windows but we do need these libraries
+        // added to the PATH due to the stage mismatch.
+        // Also see https://github.com/rust-lang/rust/pull/123192#issuecomment-2028901503.
+        add_dylib_path(self.rustc_lib_paths(run_compiler), &mut cmd);
         cmd
     }
 
