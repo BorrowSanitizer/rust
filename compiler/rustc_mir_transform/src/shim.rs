@@ -15,6 +15,8 @@ use rustc_middle::ty::{
 use rustc_middle::{bug, span_bug};
 use rustc_span::source_map::{Spanned, dummy_spanned};
 use rustc_span::{DUMMY_SP, Span};
+use rustc_target::spec::RetagMode;
+//use rustc_target::spec::RetagMode;
 use tracing::{debug, instrument};
 
 use crate::deref_separator::deref_finder;
@@ -303,7 +305,7 @@ fn dropee_emit_retag<'tcx>(
     mut dropee_ptr: Place<'tcx>,
     span: Span,
 ) -> Place<'tcx> {
-    if tcx.sess.opts.unstable_opts.mir_emit_retag {
+    if let Some(mode) = tcx.sess.opts.unstable_opts.mir_emit_retag {
         let source_info = SourceInfo::outermost(span);
         // We want to treat the function argument as if it was passed by `&mut`. As such, we
         // generate
@@ -320,10 +322,24 @@ fn dropee_emit_retag<'tcx>(
         );
         let ref_ty = reborrow.ty(body.local_decls(), tcx);
         dropee_ptr = body.local_decls.push(LocalDecl::new(ref_ty, span)).into();
-        let new_statements = [
-            StatementKind::Assign(Box::new((dropee_ptr, reborrow))),
-            StatementKind::Retag(RetagKind::FnEntry, Box::new(dropee_ptr)),
-        ];
+
+        let new_statements = if let RetagMode::Full = mode {
+            let temp_local_place = body.local_decls.push(LocalDecl::new(ref_ty, span)).into();
+            vec![
+                StatementKind::Assign(Box::new((temp_local_place, reborrow))),
+                StatementKind::Retag(RetagKind::FnEntry, Box::new(temp_local_place)),
+                StatementKind::Assign(Box::new((
+                    dropee_ptr,
+                    Rvalue::Use(Operand::Move(temp_local_place)),
+                ))),
+                StatementKind::Retag(RetagKind::FnEntry, Box::new(dropee_ptr)),
+            ]
+        } else {
+            vec![
+                StatementKind::Assign(Box::new((dropee_ptr, reborrow))),
+                StatementKind::Retag(RetagKind::FnEntry, Box::new(dropee_ptr)),
+            ]
+        };
         for s in new_statements {
             body.basic_blocks_mut()[START_BLOCK].statements.push(Statement::new(source_info, s));
         }
