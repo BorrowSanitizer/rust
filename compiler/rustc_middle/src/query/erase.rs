@@ -287,6 +287,7 @@ trivial! {
     Option<rustc_abi::FieldIdx>,
     Option<rustc_target::spec::PanicStrategy>,
     Option<usize>,
+    Option<u64>,
     Option<rustc_middle::ty::IntrinsicDef>,
     Option<rustc_abi::Align>,
     Result<(), rustc_errors::ErrorGuaranteed>,

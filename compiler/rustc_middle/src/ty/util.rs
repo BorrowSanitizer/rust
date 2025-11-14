@@ -1699,12 +1699,24 @@ pub fn intrinsic_raw(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<ty::Intrinsi
     }
 }
 
+/// Determines the permission required for retagging a type with the given `RetagParams`.
+///
+/// By default, this returns `None`, which causes all retags to become noops during codegen.
+/// Third-party plugins need to override this query.
+pub fn retag_perm<'tcx>(
+    _tcx: TyCtxt<'tcx>,
+    _key: (TypingEnv<'tcx>, Ty<'tcx>, Option<mir::Mutability>, mir::RetagKind),
+) -> Option<u64> {
+    Some(0)
+}
+
 pub fn provide(providers: &mut Providers) {
     *providers = Providers {
         reveal_opaque_types_in_bounds,
         is_doc_hidden,
         is_doc_notable_trait,
         intrinsic_raw,
+        retag_perm,
         ..*providers
     }
 }

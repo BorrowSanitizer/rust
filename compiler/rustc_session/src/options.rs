@@ -2267,6 +2267,10 @@ options! {
         "hash algorithm of source files used to check freshness in cargo (`blake3` or `sha256`)"),
     codegen_backend: Option<String> = (None, parse_opt_string, [TRACKED],
         "the backend to use"),
+    codegen_emit_retag: bool = (false, parse_bool, [TRACKED],
+        "emit retag calls in generated code (default: no)"),
+    codegen_retag_no_precise_interior_mut : bool = (false, parse_bool, [TRACKED],
+        "track interior mutable data on the level of references instead of on the byte-level (default: false)"),
     codegen_source_order: bool = (false, parse_bool, [UNTRACKED],
         "emit mono items in the order of spans in source files (default: no)"),
     contract_checks: Option<bool> = (None, parse_opt_bool, [TRACKED],
@@ -2338,6 +2342,8 @@ options! {
         "emit a section containing stack size metadata (default: no)"),
     emit_thin_lto: bool = (true, parse_bool, [TRACKED],
         "emit the bc module with thin LTO info (default: yes)"),
+    emit_lifetime_markers: bool = (false, parse_bool, [TRACKED],
+        "emit llvm.lifetime.start and llvm.lifetime.end intrinsics (default: no)"),
     emscripten_wasm_eh: bool = (false, parse_bool, [TRACKED],
         "Use WebAssembly error handling for wasm32-unknown-emscripten"),
     enforce_type_length_limit: bool = (false, parse_bool, [TRACKED],
@@ -2469,6 +2475,9 @@ options! {
         "align all functions to at least this many bytes. Must be a power of 2"),
     mir_emit_retag: bool = (false, parse_bool, [TRACKED],
         "emit Retagging MIR statements, interpreted e.g., by miri; implies -Zmir-opt-level=0 \
+        (default: no)"),
+    mir_emit_retag_raw_ptr: bool = (false, parse_bool, [TRACKED],
+        "emit Retagging MIR statements for raw pointers \
         (default: no)"),
     mir_enable_passes: Vec<(String, bool)> = (Vec::new(), parse_list_with_polarity, [TRACKED],
         "use like `-Zmir-enable-passes=+DestinationPropagation,-InstSimplify`. Forces the \
