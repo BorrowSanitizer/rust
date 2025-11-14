@@ -123,6 +123,12 @@ pub trait BuilderMethods<'a, 'tcx>:
         self.switch(v, else_llbb, cases.map(|(val, bb, _)| (val, bb)))
     }
 
+    fn phi(
+        &mut self,
+        ty: Self::Type,
+        cases: impl ExactSizeIterator<Item = (Self::BasicBlock, Self::Value)>,
+    ) -> Self::Value;
+
     fn invoke(
         &mut self,
         llty: Self::Type,

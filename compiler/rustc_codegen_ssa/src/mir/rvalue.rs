@@ -751,12 +751,14 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             },
             "Address of place was unexpectedly {val:?} for pointee type {ty:?}",
         );
+        let layout = self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty));
 
-        OperandRef {
-            val,
-            layout: self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty)),
-            move_annotation: None,
+        if layout.ty.is_raw_ptr() && bx.cx().tcx().sess.opts.unstable_opts.codegen_emit_retag {
+            let (ptr, _) = val.pointer_parts();
+            bx.expose_tag(ptr);
         }
+
+        OperandRef { val, layout, move_annotation: None }
     }
 
     fn codegen_scalar_binop(
