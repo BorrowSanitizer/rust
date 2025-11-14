@@ -873,6 +873,32 @@ crate::target_spec_enum! {
     parse_error_type = "relro level";
 }
 
+crate::target_spec_enum! {
+    pub enum RetagFields {
+        /// Recursively retag fields
+        All = "all",
+        /// Do not recurse into fields
+        None = "none",
+        /// Only recurse into fields with a Scalar ABI
+        Scalar = "scalar",
+    }
+
+    parse_error_type = "retag fields";
+}
+
+crate::target_spec_enum! {
+    #[derive(Default)]
+    pub enum RetagMode {
+        #[default]
+        /// Emit explicit retags everywhere
+        Full = "full",
+        /// Only emit retags where Miri needs them
+        Partial = "partial",
+    }
+
+    parse_error_type = "retag mode";
+}
+
 impl IntoDiagArg for PanicStrategy {
     fn into_diag_arg(self, _: &mut Option<std::path::PathBuf>) -> DiagArgValue {
         DiagArgValue::Str(Cow::Owned(self.desc().to_string()))

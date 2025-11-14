@@ -740,7 +740,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         mk_ptr_ty: impl FnOnce(TyCtxt<'tcx>, Ty<'tcx>) -> Ty<'tcx>,
     ) -> OperandRef<'tcx, Bx::Value> {
         let cg_place = self.codegen_place(bx, place.as_ref());
-        let val = cg_place.val.address();
+        let mut val = cg_place.val.address();
 
         let ty = cg_place.layout.ty;
         assert!(
@@ -751,12 +751,19 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             },
             "Address of place was unexpectedly {val:?} for pointee type {ty:?}",
         );
+        let layout = self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty));
 
-        OperandRef {
-            val,
-            layout: self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty)),
-            move_annotation: None,
+        if layout.ty.is_raw_ptr() && bx.cx().tcx().sess.opts.unstable_opts.codegen_emit_expose_tag {
+            let (ptr, data) = val.pointer_parts();
+            let exposed_ptr = bx.expose_tag(ptr);
+            val = if let Some(data) = data {
+                OperandValue::Pair(exposed_ptr, data)
+            } else {
+                OperandValue::Immediate(exposed_ptr)
+            };
         }
+
+        OperandRef { val, layout, move_annotation: None }
     }
 
     fn codegen_scalar_binop(

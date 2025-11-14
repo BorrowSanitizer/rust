@@ -319,14 +319,7 @@ impl<'a, 'tcx> Visitor<'tcx> for CfgChecker<'a, 'tcx> {
                     self.fail(location, "`SetDiscriminant`is not allowed until deaggregation");
                 }
             }
-            StatementKind::Retag(kind, _) => {
-                // FIXME(JakobDegen) The validator should check that `self.body.phase <
-                // DropsLowered`. However, this causes ICEs with generation of drop shims, which
-                // seem to fail to set their `MirPhase` correctly.
-                if matches!(kind, RetagKind::TwoPhase) {
-                    self.fail(location, format!("explicit `{kind:?}` is forbidden"));
-                }
-            }
+
             StatementKind::Coverage(kind) => {
                 if self.body.phase >= MirPhase::Analysis(AnalysisPhase::PostCleanup)
                     && let CoverageKind::BlockMarker { .. } | CoverageKind::SpanMarker { .. } = kind
@@ -338,6 +331,7 @@ impl<'a, 'tcx> Visitor<'tcx> for CfgChecker<'a, 'tcx> {
                 }
             }
             StatementKind::Assign(..)
+            | StatementKind::Retag(_, _)
             | StatementKind::StorageLive(_)
             | StatementKind::StorageDead(_)
             | StatementKind::Intrinsic(_)
@@ -1609,15 +1603,8 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     );
                 }
             }
-            StatementKind::Retag(kind, _) => {
-                // FIXME(JakobDegen) The validator should check that `self.body.phase <
-                // DropsLowered`. However, this causes ICEs with generation of drop shims, which
-                // seem to fail to set their `MirPhase` correctly.
-                if matches!(kind, RetagKind::TwoPhase) {
-                    self.fail(location, format!("explicit `{kind:?}` is forbidden"));
-                }
-            }
-            StatementKind::StorageLive(_)
+            StatementKind::Retag(_, _)
+            | StatementKind::StorageLive(_)
             | StatementKind::StorageDead(_)
             | StatementKind::Coverage(_)
             | StatementKind::ConstEvalCounter
