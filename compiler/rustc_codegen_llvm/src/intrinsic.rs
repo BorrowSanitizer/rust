@@ -640,6 +640,34 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
         }
     }
 
+    fn retag(
+        &mut self,
+        ptr: Self::Value,
+        size: Size,
+        perm: u64,
+        protected: bool,
+        im_layout: Self::Value,
+    ) -> Self::Value {
+        let size = self.const_usize(size.bytes());
+        let perm = self.const_u64(perm);
+        let protected = self.const_bool(protected);
+        self.call_intrinsic(
+            "__rust_retag",
+            &[
+                self.val_ty(ptr),
+                self.val_ty(size),
+                self.type_i64(),
+                self.type_bool(),
+                self.val_ty(im_layout),
+            ],
+            &[ptr, size, perm, protected, im_layout],
+        )
+    }
+
+    fn expose_tag(&mut self, ptr: Self::Value) {
+        self.call_intrinsic("__rust_expose_tag", &[self.val_ty(ptr)], &[ptr]);
+    }
+
     fn type_checked_load(
         &mut self,
         llvtable: &'ll Value,

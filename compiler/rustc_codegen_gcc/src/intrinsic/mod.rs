@@ -9,7 +9,7 @@ use gccjit::Type;
 use gccjit::{ComparisonOp, Function, FunctionType, RValue, ToRValue, UnaryOp};
 #[cfg(feature = "master")]
 use rustc_abi::ExternAbi;
-use rustc_abi::{BackendRepr, HasDataLayout};
+use rustc_abi::{BackendRepr, HasDataLayout, Size};
 use rustc_codegen_ssa::MemFlags;
 use rustc_codegen_ssa::base::wants_msvc_seh;
 use rustc_codegen_ssa::common::IntPredicate;
@@ -652,6 +652,20 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
     fn expect(&mut self, cond: Self::Value, _expected: bool) -> Self::Value {
         // TODO(antoyo)
         cond
+    }
+
+    fn retag(
+        &mut self,
+        _ptr: Self::Value,
+        _size: Size,
+        _perm: u64,
+        _protected: bool,
+    ) -> Self::Value {
+        unimplemented!()
+    }
+
+    fn expose_tag(&mut self, _ptr: Self::Value) {
+        unimplemented!()
     }
 
     fn type_checked_load(

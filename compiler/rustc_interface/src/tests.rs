@@ -778,6 +778,8 @@ fn test_unstable_options_tracking_hash() {
         })
     );
     tracked!(codegen_backend, Some("abc".to_string()));
+    tracked!(codegen_emit_retag, true);
+    tracked!(codegen_retag_no_precise_interior_mut, false);
     tracked!(
         coverage_options,
         CoverageOptions {
@@ -798,6 +800,7 @@ fn test_unstable_options_tracking_hash() {
     tracked!(embed_metadata, false);
     tracked!(embed_source, true);
     tracked!(emit_thin_lto, false);
+    tracked!(emit_lifetime_markers, false);
     tracked!(emscripten_wasm_eh, true);
     tracked!(export_executable_symbols, true);
     tracked!(fewer_names, Some(true));
