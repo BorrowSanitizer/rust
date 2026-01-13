@@ -99,8 +99,6 @@ removeUnusedFilesAndDirs() {
         # Paths common to all runners (both x86 and ARM)
         to_remove+=(
             "/usr/local/aws-sam-cli"
-            "/usr/local/doc/cmake"
-            "/usr/local/share/cmake-"*
             "/usr/local/share/emacs"
             "/usr/local/share/gecko_driver"
             "/usr/local/share/icons"
@@ -115,9 +113,6 @@ removeUnusedFilesAndDirs() {
 
             # binaries
             "/usr/local/bin/azcopy"
-            "/usr/local/bin/ccmake"
-            "/usr/local/bin/cmake-"*
-            "/usr/local/bin/cmake"
             "/usr/local/bin/cpack"
             "/usr/local/bin/ctest"
             "/usr/local/bin/helm"

@@ -77,6 +77,7 @@ impl TermInfo {
 
     /// Creates a TermInfo for the named terminal.
     pub(crate) fn from_name(name: &str) -> Result<TermInfo, Error> {
+        #[allow(unexpected_cfgs)]
         if cfg!(miri) || cfg!(bsan) {
             // Avoid all the work of parsing the terminfo (it's pretty slow under Miri), and just
             // assume that the standard color codes work (like e.g. the 'colored' crate).
