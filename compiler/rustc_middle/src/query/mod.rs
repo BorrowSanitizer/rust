@@ -2781,6 +2781,9 @@ rustc_queries! {
         cache_on_disk_if { *cnum == LOCAL_CRATE }
         separate_provide_extern
     }
+    query retag_perm(key: (ty::TypingEnv<'tcx>, Ty<'tcx>, Ty<'tcx>, mir::RetagKind)) -> Option<u64> {
+        desc { |tcx| "computing the permission for retagging" }
+    }
 }
 
 rustc_with_all_queries! { define_callbacks! }
