@@ -328,7 +328,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     ) -> PlaceRef<'tcx, Bx::Value> {
         let cx = self.cx;
         let tcx = self.cx.tcx();
-
         let mut base = 0;
         let mut cg_base = match self.locals[place_ref.local] {
             LocalRef::Place(place) => place,

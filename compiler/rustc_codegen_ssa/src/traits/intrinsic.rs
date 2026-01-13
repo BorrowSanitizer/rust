@@ -1,7 +1,9 @@
+use rustc_abi::Size;
 use rustc_middle::ty;
 use rustc_span::Span;
 
 use super::BackendTypes;
+use crate::RetagFlags;
 use crate::mir::operand::OperandRef;
 use crate::mir::place::PlaceRef;
 
@@ -49,4 +51,21 @@ pub trait IntrinsicCallBuilderMethods<'tcx>: BackendTypes {
     /// Trait method used to inject `va_end` on the "spoofed" `VaList` before
     /// Rust defined C-variadic functions return.
     fn va_end(&mut self, val: Self::Value) -> Self::Value;
+    fn retag_place(
+        &mut self,
+        place: Self::Value,
+        im_layout: Self::Value,
+        size: Size,
+        perm: u64,
+        flags: RetagFlags,
+    );
+    fn retag_operand(
+        &mut self,
+        ptr: Self::Value,
+        im_layout: Self::Value,
+        size: Size,
+        perm: u64,
+        flags: RetagFlags,
+    ) -> Self::Value;
+    fn expose_tag(&mut self, _ptr: Self::Value) -> Self::Value;
 }
