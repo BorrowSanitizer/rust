@@ -17,6 +17,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rustc_abi::Size;
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap};
 use rustc_data_structures::unord::UnordMap;
 use rustc_hir::CRATE_HIR_ID;
@@ -170,6 +171,27 @@ bitflags::bitflags! {
         const NONTEMPORAL = 1 << 1;
         const UNALIGNED = 1 << 2;
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct RetagInfo<V> {
+    /// The size of the initial range within the allocation that is
+    /// associated with the permission created by the retag.
+    pub size: Size,
+    /// A constant array of (offset, size) pairs describing
+    /// the ranges covered by `UnsafeCell` within the pointee type.
+    pub im_layout: V,
+    /// A constant array of (offset, size) pairs describing
+    /// the ranges covered by `UnsafePinned` within the pointee type.
+    pub pin_layout: V,
+    /// If this is a function-entry retag, which creates a protector.
+    pub is_protected: bool,
+    /// If the pointee type is `Unpin`
+    pub pointee_is_unpin: bool,
+    /// If this is a mutable reference or a `Box`.
+    pub is_mutable: bool,
+    /// If this is a box, which implies `is_mutable`.
+    pub is_box: bool,
 }
 
 // This is the same as `rustc_session::cstore::NativeLib`, except:
