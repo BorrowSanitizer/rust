@@ -98,12 +98,10 @@ removeUnusedFilesAndDirs() {
     if isGitHubRunner; then
         to_remove+=(
             "/usr/local/aws-sam-cli"
-            "/usr/local/doc/cmake"
             "/usr/local/julia"*
             "/usr/local/lib/android"
             "/usr/local/share/chromedriver-"*
             "/usr/local/share/chromium"
-            "/usr/local/share/cmake-"*
             "/usr/local/share/edge_driver"
             "/usr/local/share/emacs"
             "/usr/local/share/gecko_driver"
@@ -122,9 +120,6 @@ removeUnusedFilesAndDirs() {
             # binaries
             "/usr/local/bin/azcopy"
             "/usr/local/bin/bicep"
-            "/usr/local/bin/ccmake"
-            "/usr/local/bin/cmake-"*
-            "/usr/local/bin/cmake"
             "/usr/local/bin/cpack"
             "/usr/local/bin/ctest"
             "/usr/local/bin/helm"
