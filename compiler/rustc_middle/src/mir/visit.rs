@@ -897,6 +897,7 @@ macro_rules! make_mir_visitor {
                     user_ty,
                     source_info,
                     local_info: _,
+                    ..
                 } = local_decl;
 
                 self.visit_source_info(source_info);

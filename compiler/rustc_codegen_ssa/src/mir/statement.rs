@@ -14,7 +14,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             mir::StatementKind::Assign(box (ref place, ref rvalue)) => {
                 if let Some(index) = place.as_local() {
                     match self.locals[index] {
-                        LocalRef::Place(cg_dest) => self.codegen_rvalue(bx, cg_dest, rvalue),
+                        LocalRef::Place(cg_dest) => {
+                            self.codegen_rvalue(bx, cg_dest, rvalue);
+                        }
                         LocalRef::UnsizedPlace(cg_indirect_dest) => {
                             let ty = cg_indirect_dest.layout.ty;
                             span_bug!(
@@ -36,16 +38,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                                     rvalue
                                 );
                             }
-
                             // If the type is zero-sized, it's already been set here,
-                            // but we still need to make sure we codegen the operand
+                            // but we still need to make sure we codegen the operand.
+                            // Zero-sized types do not need to be retagged.
                             self.codegen_rvalue_operand(bx, rvalue);
                         }
                     }
                 } else {
                     let cg_dest = self.codegen_place(bx, place.as_ref());
                     self.codegen_rvalue(bx, cg_dest, rvalue);
-                }
+                };
             }
             mir::StatementKind::SetDiscriminant { box ref place, variant_index } => {
                 self.codegen_place(bx, place.as_ref()).codegen_set_discr(bx, variant_index);

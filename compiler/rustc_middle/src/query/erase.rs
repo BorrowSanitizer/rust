@@ -291,6 +291,7 @@ trivial! {
     Option<rustc_span::Span>,
     Option<rustc_abi::FieldIdx>,
     Option<rustc_target::spec::PanicStrategy>,
+    Option<u64>,
     Option<usize>,
     Option<rustc_middle::ty::IntrinsicDef>,
     Option<rustc_abi::Align>,
