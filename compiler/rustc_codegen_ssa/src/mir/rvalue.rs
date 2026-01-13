@@ -1,5 +1,6 @@
 use itertools::Itertools as _;
 use rustc_abi::{self as abi, BackendRepr, FIRST_VARIANT};
+use rustc_middle::mir::RetagKind;
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt};
@@ -12,7 +13,7 @@ use super::operand::{OperandRef, OperandRefBuilder, OperandValue};
 use super::place::{PlaceRef, PlaceValue, codegen_tag_value};
 use crate::common::{IntPredicate, TypeKind};
 use crate::traits::*;
-use crate::{MemFlags, base};
+use crate::{MemFlags, RetagFlags, base};
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     #[instrument(level = "trace", skip(self, bx))]
@@ -507,14 +508,38 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let mk_ref = move |tcx: TyCtxt<'tcx>, ty: Ty<'tcx>| {
                     Ty::new_ref(tcx, tcx.lifetimes.re_erased, ty, bk.to_mutbl_lossy())
                 };
-                self.codegen_place_to_pointer(bx, place, mk_ref)
+                let mut op = self.codegen_place_to_pointer(bx, place, mk_ref);
+
+                if self.cx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+                    let kind = if bk.allows_two_phase_borrow() {
+                        RetagKind::TwoPhase
+                    } else {
+                        RetagKind::Default
+                    };
+                    let flags = RetagFlags::for_place(self.mir, &place);
+                    op = self.codegen_retag_operand(bx, op, flags, kind);
+                };
+
+                op
             }
 
             mir::Rvalue::RawPtr(kind, place) => {
                 let mk_ptr = move |tcx: TyCtxt<'tcx>, ty: Ty<'tcx>| {
                     Ty::new_ptr(tcx, ty, kind.to_mutbl_lossy())
                 };
-                self.codegen_place_to_pointer(bx, place, mk_ptr)
+                let mut op = self.codegen_place_to_pointer(bx, place, mk_ptr);
+
+                if self.cx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+                    let (addr, extra) = op.val.pointer_parts();
+                    let exposed = bx.expose_tag(addr);
+                    op.val = if let Some(extra) = extra {
+                        OperandValue::Pair(exposed, extra)
+                    } else {
+                        OperandValue::Immediate(exposed)
+                    };
+                }
+
+                op
             }
 
             mir::Rvalue::BinaryOp(op_with_overflow, box (ref lhs, ref rhs))

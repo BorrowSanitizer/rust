@@ -961,6 +961,12 @@ pub struct LocalDecl<'tcx> {
 
     pub local_info: ClearCrossCrate<Box<LocalInfo<'tcx>>>,
 
+    /// Whether this local was created as a temporary for a dereference operation.
+    /// Usually, this is only available prior to runtime MIR. However, to emit
+    /// retags at codegen, we need to know if the local was a temporary, since
+    /// these locals do not need to be retagged.
+    pub is_deref_temp: bool,
+
     /// The type of this local.
     pub ty: Ty<'tcx>,
 
@@ -1157,10 +1163,7 @@ impl<'tcx> LocalDecl<'tcx> {
 
     /// Returns `true` if this is a DerefTemp
     pub fn is_deref_temp(&self) -> bool {
-        match self.local_info() {
-            LocalInfo::DerefTemp => true,
-            _ => false,
-        }
+        self.is_deref_temp
     }
 
     /// Returns `true` is the local is from a compiler desugaring, e.g.,
@@ -1185,6 +1188,7 @@ impl<'tcx> LocalDecl<'tcx> {
             ty,
             user_ty: None,
             source_info,
+            is_deref_temp: false,
         }
     }
 

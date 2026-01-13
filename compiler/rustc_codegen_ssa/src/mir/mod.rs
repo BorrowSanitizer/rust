@@ -3,15 +3,15 @@ use std::iter;
 use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
-use rustc_middle::mir::{Body, Local, UnwindTerminateReason, traversal};
+use rustc_middle::mir::{Body, Local, RetagKind, UnwindTerminateReason, traversal};
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitableExt};
 use rustc_middle::{bug, mir, span_bug};
 use rustc_target::callconv::{FnAbi, PassMode};
 use tracing::{debug, instrument};
 
-use crate::base;
 use crate::traits::*;
+use crate::{RetagFlags, base};
 
 mod analyze;
 mod block;
@@ -23,6 +23,7 @@ mod locals;
 pub mod naked_asm;
 pub mod operand;
 pub mod place;
+mod retag;
 mod rvalue;
 mod statement;
 
@@ -250,10 +251,10 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let traversal_order = traversal::mono_reachable_reverse_postorder(mir, tcx, instance);
     let memory_locals = analyze::non_ssa_locals(&fx, &traversal_order);
 
+    let args = arg_local_refs(&mut start_bx, &mut fx, &memory_locals);
+
     // Allocate variable and temp allocas
     let local_values = {
-        let args = arg_local_refs(&mut start_bx, &mut fx, &memory_locals);
-
         let mut allocate_local = |local: Local| {
             let decl = &mir.local_decls[local];
             let layout = start_bx.layout_of(fx.monomorphize(decl.ty));
@@ -294,6 +295,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             .chain(mir.vars_and_temps_iter().map(allocate_local))
             .collect()
     };
+
     fx.initialize_locals(local_values);
 
     // Apply debuginfo to the newly allocated locals.
@@ -395,7 +397,7 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         return vec![];
     }
 
-    let args = mir
+    let mut args = mir
         .args_iter()
         .enumerate()
         .map(|(arg_index, local)| {
@@ -529,6 +531,55 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             }
         })
         .collect::<Vec<_>>();
+    if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+        if let ty::InstanceKind::DropGlue(_, _) | ty::InstanceKind::AsyncDropGlue(_, _) =
+            fx.instance.def
+        {
+            assert_eq!(args.len(), 1, "drop shims should have a single argument");
+            args[0] = dropee_emit_retag(bx, fx, &args[0]);
+        } else {
+            args = args
+                .iter()
+                .map(|arg| match arg {
+                    &LocalRef::Place(place_ref) => {
+                        fx.codegen_retag_place(
+                            bx,
+                            place_ref,
+                            RetagFlags::empty(),
+                            RetagKind::FnEntry,
+                        );
+                        LocalRef::Place(place_ref)
+                    }
+                    &LocalRef::UnsizedPlace(place_ref) => {
+                        let operand = bx.load_operand(place_ref);
+                        let retagged = fx.codegen_retag_operand(
+                            bx,
+                            operand,
+                            RetagFlags::empty(),
+                            RetagKind::FnEntry,
+                        );
+                        assert!(matches!(retagged.val, OperandValue::Pair(_, _)));
+                        retagged.val.store(bx, place_ref);
+                        LocalRef::UnsizedPlace(place_ref)
+                    }
+                    &LocalRef::Operand(operand_ref) => {
+                        let retagged = fx.codegen_retag_operand(
+                            bx,
+                            operand_ref,
+                            RetagFlags::empty(),
+                            RetagKind::FnEntry,
+                        );
+                        LocalRef::Operand(retagged)
+                    }
+                    LocalRef::PendingOperand => LocalRef::PendingOperand,
+                })
+                .collect::<Vec<_>>();
+        }
+    }
+    // If we retagged a value with variants, then we will have branched to
+    // a new block. Update the backend basic block for the starting MIR
+    // block to be whichever block we are currently inserting into.
+    fx.cached_llbbs[mir::START_BLOCK] = CachedLlbb::Some(bx.llbb());
 
     if fx.instance.def.requires_caller_location(bx.tcx()) {
         let mir_args = if let Some(num_untupled) = num_untupled {
@@ -558,6 +609,40 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     }
 
     args
+}
+
+fn dropee_emit_retag<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+    bx: &mut Bx,
+    fx: &mut FunctionCx<'a, 'tcx, Bx>,
+    local: &LocalRef<'tcx, Bx::Value>,
+) -> LocalRef<'tcx, Bx::Value> {
+    // We want to treat the function argument as if it was passed by `&mut`.
+    // However, this alias is never used; its role is to apply a protector
+    // to the argument. Instead of inserting a reborrow, we treat the pointer
+    // operand as if it was a mutable reference, and we emit a retag intrinsic
+    // without replacing the value. We need this cast to that calls to the
+    // `retag_perm` query treat the value as a reference, and produce the correct
+    // permission for a function-entry retag.
+    if let &LocalRef::Operand(OperandRef { val, layout, move_annotation }) = local {
+        if layout.ty.is_raw_ptr()
+            && let Some(deref_ty) = layout.ty.builtin_deref(true)
+        {
+            let kind = ty::Ref(bx.tcx().lifetimes.re_erased, deref_ty, ty::Mutability::Mut);
+            let ref_ty = bx.tcx().mk_ty_from_kind(kind);
+            let ref_layout = bx.layout_of(ref_ty);
+
+            let operand_ref = OperandRef { val, layout: ref_layout, move_annotation };
+
+            let retagged =
+                fx.codegen_retag_operand(bx, operand_ref, RetagFlags::empty(), RetagKind::FnEntry);
+
+            LocalRef::Operand(OperandRef { val: retagged.val, layout, move_annotation })
+        } else {
+            bug!("dropee isn't a raw ptr");
+        }
+    } else {
+        bug!("dropee isn't an operand");
+    }
 }
 
 fn find_cold_blocks<'tcx>(

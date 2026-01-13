@@ -2826,6 +2826,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     introductions: Vec::new(),
                 },
             )))),
+            is_deref_temp: false,
         };
         let for_arm_body = self.local_decls.push(local);
         if self.should_emit_debug_info_for_binding(name, var_id) {
@@ -2848,6 +2849,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 local_info: ClearCrossCrate::Set(Box::new(LocalInfo::User(
                     BindingForm::RefForGuard(for_arm_body),
                 ))),
+                is_deref_temp: false,
             });
             if self.should_emit_debug_info_for_binding(name, var_id) {
                 self.var_debug_info.push(VarDebugInfo {

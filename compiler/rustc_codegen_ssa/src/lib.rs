@@ -177,6 +177,14 @@ bitflags::bitflags! {
     }
 }
 
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct RetagFlags: u8 {
+        const FROM_RAW = 1 << 0;
+        const FN_ENTRY = 1 << 1;
+    }
+}
+
 #[derive(Clone, Debug, Encodable, Decodable, HashStable)]
 pub struct NativeLib {
     pub kind: NativeLibKind,

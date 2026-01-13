@@ -6,6 +6,7 @@ use std::ptr;
 use rustc_abi::{
     Align, BackendRepr, ExternAbi, Float, HasDataLayout, Primitive, Size, WrappingRange,
 };
+use rustc_codegen_ssa::RetagFlags;
 use rustc_codegen_ssa::base::{compare_simd_types, wants_msvc_seh, wants_wasm_eh};
 use rustc_codegen_ssa::codegen_attrs::autodiff_attrs;
 use rustc_codegen_ssa::common::{IntPredicate, TypeKind};
@@ -781,6 +782,62 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
 
     fn va_end(&mut self, va_list: &'ll Value) -> &'ll Value {
         self.call_intrinsic("llvm.va_end", &[self.val_ty(va_list)], &[va_list])
+    }
+
+    fn retag_operand(
+        &mut self,
+        ptr: Self::Value,
+        im_layout: Self::Value,
+        size: Size,
+        perm: u64,
+        flags: RetagFlags,
+    ) -> Self::Value {
+        let size = self.const_u64(size.bytes());
+        let perm = self.const_u64(perm);
+        let retag = self.call_intrinsic(
+            "__rust_retag_operand",
+            &[self.type_ptr(), self.type_ptr(), self.type_i64(), self.type_i64()],
+            &[ptr, im_layout, size, perm],
+        );
+        apply_retag_metadata(self, retag, flags);
+        retag
+    }
+
+    fn retag_place(
+        &mut self,
+        place: Self::Value,
+        im_layout: Self::Value,
+        size: Size,
+        perm: u64,
+        flags: RetagFlags,
+    ) {
+        let size = self.const_u64(size.bytes());
+        let perm = self.const_u64(perm);
+        let retag = self.call_intrinsic(
+            "__rust_retag_place",
+            &[self.type_ptr(), self.type_ptr(), self.type_i64(), self.type_i64()],
+            &[place, im_layout, size, perm],
+        );
+        apply_retag_metadata(self, retag, flags);
+    }
+
+    fn expose_tag(&mut self, ptr: Self::Value) -> Self::Value {
+        self.call_intrinsic("__rust_expose_tag", &[self.type_ptr()], &[ptr])
+    }
+}
+
+fn apply_retag_metadata<'ll, 'tcx>(
+    bx: &mut Builder<'_, 'll, 'tcx>,
+    data: &'ll Value,
+    flags: RetagFlags,
+) {
+    let metadata_nodes = flags
+        .iter_names()
+        .map(|(name, _)| bx.create_metadata(name.to_lowercase().as_bytes()))
+        .collect::<Vec<_>>();
+
+    if !metadata_nodes.is_empty() {
+        bx.set_metadata_node(data, llvm::MD_annotation, &metadata_nodes);
     }
 }
 
