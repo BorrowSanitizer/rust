@@ -539,6 +539,7 @@ impl Session {
         // HWAddressSanitizer and KernelHWAddressSanitizer will use lifetimes to detect use after
         // scope bugs in the future.
         || self.sanitizers().intersects(SanitizerSet::ADDRESS | SanitizerSet::KERNELADDRESS | SanitizerSet::MEMORY | SanitizerSet::HWADDRESS | SanitizerSet::KERNELHWADDRESS)
+        || self.opts.unstable_opts.llvm_emit_lifetime_markers
     }
 
     pub fn diagnostic_width(&self) -> usize {

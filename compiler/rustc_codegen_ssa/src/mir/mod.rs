@@ -3,7 +3,7 @@ use std::iter;
 use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
-use rustc_middle::mir::{Body, Local, UnwindTerminateReason, traversal};
+use rustc_middle::mir::{Body, Local, RetagKind, UnwindTerminateReason, traversal};
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitableExt};
 use rustc_middle::{bug, mir, span_bug};
@@ -23,6 +23,7 @@ mod locals;
 pub mod naked_asm;
 pub mod operand;
 pub mod place;
+mod retag;
 mod rvalue;
 mod statement;
 
@@ -297,6 +298,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             .chain(mir.vars_and_temps_iter().map(allocate_local))
             .collect()
     };
+
     fx.initialize_locals(local_values);
 
     // Apply debuginfo to the newly allocated locals.
@@ -398,7 +400,7 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         return vec![];
     }
 
-    let args = mir
+    let mut args = mir
         .args_iter()
         .enumerate()
         .map(|(arg_index, local)| {
@@ -533,6 +535,42 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         })
         .collect::<Vec<_>>();
 
+    if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+        let retag_kind = RetagKind::FnEntry;
+        if let ty::InstanceKind::DropGlue(_, _) | ty::InstanceKind::AsyncDropGlue(_, _) =
+            fx.instance.def
+        {
+            assert_eq!(args.len(), 1, "drop shims should have a single argument");
+            args[0] = dropee_emit_retag(bx, fx, &args[0], retag_kind);
+        } else {
+            args = args
+                .iter()
+                .map(|arg| match arg {
+                    &LocalRef::Place(place_ref) => {
+                        fx.codegen_retag_place(bx, place_ref, retag_kind);
+                        LocalRef::Place(place_ref)
+                    }
+                    &LocalRef::UnsizedPlace(place_ref) => {
+                        let operand = bx.load_operand(place_ref);
+                        let retagged = fx.codegen_retag_operand(bx, operand, retag_kind);
+                        assert!(matches!(retagged.val, OperandValue::Pair(_, _)));
+                        retagged.val.store(bx, place_ref);
+                        LocalRef::UnsizedPlace(place_ref)
+                    }
+                    &LocalRef::Operand(operand_ref) => {
+                        let retagged = fx.codegen_retag_operand(bx, operand_ref, retag_kind);
+                        LocalRef::Operand(retagged)
+                    }
+                    LocalRef::PendingOperand => LocalRef::PendingOperand,
+                })
+                .collect::<Vec<_>>();
+        }
+        // If we retagged a value with variants, then we will have branched to
+        // a new block. Update the backend basic block for the starting MIR
+        // block to be whichever block we are currently inserting into.
+        fx.cached_llbbs[mir::START_BLOCK] = CachedLlbb::Some(bx.llbb());
+    }
+
     if fx.instance.def.requires_caller_location(bx.tcx()) {
         let mir_args = if let Some(num_untupled) = num_untupled {
             // Subtract off the tupled argument that gets 'expanded'
@@ -561,6 +599,35 @@ fn arg_local_refs<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     }
 
     args
+}
+#[allow(unused)]
+fn dropee_emit_retag<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+    bx: &mut Bx,
+    fx: &mut FunctionCx<'a, 'tcx, Bx>,
+    local: &LocalRef<'tcx, Bx::Value>,
+    retag_kind: RetagKind,
+) -> LocalRef<'tcx, Bx::Value> {
+    // We want to treat the function argument as if it was passed by `&mut`.
+    // However, this alias is never used; its role is to apply a protector
+    // to the argument. Instead of inserting a reborrow, we treat the pointer
+    // operand as if it was a mutable reference, and we emit a retag intrinsic
+    // without replacing the value.
+    if let &LocalRef::Operand(OperandRef { val, layout, move_annotation }) = local {
+        if layout.ty.is_raw_ptr()
+            && let Some(deref_ty) = layout.ty.builtin_deref(true)
+        {
+            let kind = ty::Ref(bx.tcx().lifetimes.re_erased, deref_ty, ty::Mutability::Mut);
+            let ref_ty = bx.tcx().mk_ty_from_kind(kind);
+            let ref_layout = bx.layout_of(ref_ty);
+
+            let operand_ref = OperandRef { val, layout: ref_layout, move_annotation };
+
+            let retagged = fx.codegen_retag_operand(bx, operand_ref, retag_kind);
+
+            return LocalRef::Operand(OperandRef { val: retagged.val, layout, move_annotation });
+        }
+    }
+    bug!("dropee isn't a raw pointer operand")
 }
 
 fn find_cold_blocks<'tcx>(

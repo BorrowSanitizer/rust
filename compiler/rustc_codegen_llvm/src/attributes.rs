@@ -70,7 +70,13 @@ pub(crate) fn inline_attr<'ll, 'tcx>(
                 None
             }
         }
-        InlineAttr::None => None,
+        InlineAttr::None => {
+            if tcx.sess.opts.unstable_opts.codegen_emit_retag {
+                return Some(AttributeKind::NoInline.create_attr(cx.llcx));
+            } else {
+                None
+            }
+        }
     }
 }
 
