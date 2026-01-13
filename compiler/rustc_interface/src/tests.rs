@@ -787,6 +787,8 @@ fn test_unstable_options_tracking_hash() {
             discard_all_spans_in_codegen: true,
         }
     );
+    tracked!(codegen_emit_retag, true);
+    tracked!(codegen_retag_no_precise_interior_mut, true);
     tracked!(crate_attr, vec!["abc".to_string()]);
     tracked!(cross_crate_inline_threshold, InliningThreshold::Always);
     tracked!(debug_info_for_profiling, true);
@@ -820,6 +822,7 @@ fn test_unstable_options_tracking_hash() {
     tracked!(link_directives, false);
     tracked!(link_only, true);
     tracked!(lint_llvm_ir, true);
+    tracked!(llvm_emit_lifetime_markers, true);
     tracked!(llvm_module_flag, vec![("bar".to_string(), 123, "max".to_string())]);
     tracked!(llvm_plugins, vec![String::from("plugin_name")]);
     tracked!(location_detail, LocationDetail { file: true, line: false, column: false });

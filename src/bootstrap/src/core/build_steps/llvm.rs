@@ -522,17 +522,8 @@ impl Step for Llvm {
             }
         }
 
-        let llvm_version_suffix = if let Some(ref suffix) = builder.config.llvm_version_suffix {
-            // Allow version-suffix="" to not define a version suffix at all.
-            if !suffix.is_empty() { Some(suffix.to_string()) } else { None }
-        } else if builder.config.channel == "dev" {
-            // Changes to a version suffix require a complete rebuild of the LLVM.
-            // To avoid rebuilds during a time of version bump, don't include rustc
-            // release number on the dev channel.
-            Some("-rust-dev".to_string())
-        } else {
-            Some(format!("-rust-{}-{}", builder.version, builder.config.channel))
-        };
+        let llvm_version_suffix = get_llvm_version_suffix(builder);
+
         if let Some(ref suffix) = llvm_version_suffix {
             cfg.define("LLVM_VERSION_SUFFIX", suffix);
         }
@@ -603,6 +594,20 @@ impl Step for Llvm {
 
     fn metadata(&self) -> Option<StepMetadata> {
         Some(StepMetadata::build("llvm", self.target))
+    }
+}
+
+pub fn get_llvm_version_suffix(builder: &Builder<'_>) -> Option<String> {
+    if let Some(ref suffix) = builder.config.llvm_version_suffix {
+        // Allow version-suffix="" to not define a version suffix at all.
+        if !suffix.is_empty() { Some(suffix.to_string()) } else { None }
+    } else if builder.config.channel == "dev" {
+        // Changes to a version suffix require a complete rebuild of the LLVM.
+        // To avoid rebuilds during a time of version bump, don't include rustc
+        // release number on the dev channel.
+        Some("-rust-dev".to_string())
+    } else {
+        Some(format!("-rust-{}-{}", builder.version, builder.config.channel))
     }
 }
 

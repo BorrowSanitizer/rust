@@ -1,5 +1,6 @@
 use itertools::Itertools as _;
 use rustc_abi::{self as abi, BackendRepr, FIRST_VARIANT};
+use rustc_middle::mir::RetagKind;
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt};
@@ -507,7 +508,17 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let mk_ref = move |tcx: TyCtxt<'tcx>, ty: Ty<'tcx>| {
                     Ty::new_ref(tcx, tcx.lifetimes.re_erased, ty, bk.to_mutbl_lossy())
                 };
-                self.codegen_place_to_pointer(bx, place, mk_ref)
+                let mut op = self.codegen_place_to_pointer(bx, place, mk_ref);
+
+                if self.cx.tcx().sess.opts.unstable_opts.codegen_emit_retag {
+                    let kind = if bk.allows_two_phase_borrow() {
+                        RetagKind::TwoPhase
+                    } else {
+                        RetagKind::Default
+                    };
+                    op = self.codegen_retag_operand(bx, op, kind);
+                };
+                op
             }
 
             mir::Rvalue::RawPtr(kind, place) => {

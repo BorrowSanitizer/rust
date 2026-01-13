@@ -560,6 +560,14 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         self.llbb().end_with_conditional(self.location, cond, then_block, else_block)
     }
 
+    fn phi(
+        &mut self,
+        ty: &'ll Type,
+        cases: impl ExactSizeIterator<Item = (Self::BasicBlock, Self::Value)>,
+    ) -> Self::Value {
+        unimplemented!()
+    }
+
     fn switch(
         &mut self,
         value: RValue<'gcc>,
