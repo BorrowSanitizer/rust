@@ -1680,15 +1680,16 @@ impl Build {
     /// Returns the `a.b.c` version that the given package is at.
     fn release_num(&self, package: &str) -> String {
         let toml_file_name = self.src.join(format!("src/tools/{package}/Cargo.toml"));
-        let toml = t!(fs::read_to_string(toml_file_name));
-        for line in toml.lines() {
-            if let Some(stripped) =
-                line.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"'))
-            {
-                return stripped.to_owned();
+        if toml_file_name.exists() {
+            let toml = t!(fs::read_to_string(toml_file_name));
+            for line in toml.lines() {
+                if let Some(stripped) =
+                    line.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"'))
+                {
+                    return stripped.to_owned();
+                }
             }
         }
-
         panic!("failed to find version in {package}'s Cargo.toml")
     }
 
