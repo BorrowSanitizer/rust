@@ -6,6 +6,7 @@ use std::ptr;
 use rustc_abi::{
     Align, BackendRepr, ExternAbi, Float, HasDataLayout, Primitive, Size, WrappingRange,
 };
+use rustc_codegen_ssa::RetagInfo;
 use rustc_codegen_ssa::base::{compare_simd_types, wants_msvc_seh, wants_wasm_eh};
 use rustc_codegen_ssa::codegen_attrs::autodiff_attrs;
 use rustc_codegen_ssa::common::{IntPredicate, TypeKind};
@@ -782,6 +783,45 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
     fn va_end(&mut self, va_list: &'ll Value) -> &'ll Value {
         self.call_intrinsic("llvm.va_end", &[self.val_ty(va_list)], &[va_list])
     }
+
+    fn retag_reg(
+        &mut self,
+        ptr: Self::Value,
+        im_layout: Self::Value,
+        info: RetagInfo,
+    ) -> Self::Value {
+        codegen_retag_inner(self, "__rust_retag_reg", ptr, im_layout, info)
+    }
+
+    fn retag_mem(&mut self, ptr: Self::Value, im_layout: Self::Value, info: RetagInfo) {
+        codegen_retag_inner(self, "__rust_retag_mem", ptr, im_layout, info);
+    }
+}
+fn codegen_retag_inner<'ll, 'tcx>(
+    bx: &mut Builder<'_, 'll, 'tcx>,
+    name: &'static str,
+    ptr: &'ll Value,
+    im_layout: &'ll Value,
+    info: RetagInfo,
+) -> &'ll Value {
+    let size = bx.const_usize(info.size.bytes());
+    let is_protected = bx.const_u8(info.is_protected as u8);
+    let is_freeze = bx.const_u8(info.ty_is_freeze as u8);
+    let is_unpin = bx.const_u8(info.ty_is_unpin as u8);
+    let ptr_kind = bx.const_u8(info.get_ptr_kind());
+    bx.call_intrinsic(
+        name,
+        &[
+            bx.type_ptr(),
+            bx.type_ptr(),
+            bx.val_ty(size),
+            bx.type_i8(),
+            bx.type_i8(),
+            bx.type_i8(),
+            bx.type_i8(),
+        ],
+        &[ptr, im_layout, size, is_protected, is_freeze, is_unpin, ptr_kind],
+    )
 }
 
 fn catch_unwind_intrinsic<'ll, 'tcx>(

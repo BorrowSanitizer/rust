@@ -36,9 +36,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                                     rvalue
                                 );
                             }
-
                             // If the type is zero-sized, it's already been set here,
-                            // but we still need to make sure we codegen the operand
+                            // but we still need to make sure we codegen the operand.
+                            // Zero-sized types do not need to be retagged.
                             self.codegen_rvalue_operand(bx, rvalue);
                         }
                     }

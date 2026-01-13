@@ -21,6 +21,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rustc_abi::Size;
+use rustc_ast::Mutability;
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap};
 use rustc_data_structures::unord::UnordMap;
 use rustc_hir::CRATE_HIR_ID;
@@ -174,6 +176,29 @@ bitflags::bitflags! {
         const VOLATILE = 1 << 0;
         const NONTEMPORAL = 1 << 1;
         const UNALIGNED = 1 << 2;
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct RetagInfo {
+    /// The size of the initial range within the allocation that is
+    /// associated with the permission created by the retag.
+    pub size: Size,
+    pub is_protected: bool,
+    pub ty_is_freeze: bool,
+    pub ty_is_unpin: bool,
+    /// The kind of pointer being retagged. If `None`,
+    /// then this is a `Box`.
+    ptr_kind: Option<Mutability>,
+}
+
+impl RetagInfo {
+    pub fn get_ptr_kind(&self) -> u8 {
+        match self.ptr_kind {
+            Some(Mutability::Mut) => 2,
+            Some(Mutability::Not) => 1,
+            None => 0,
+        }
     }
 }
 
