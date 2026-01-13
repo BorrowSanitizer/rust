@@ -10,7 +10,6 @@ use gccjit::{ComparisonOp, Function, FunctionType, RValue, ToRValue, UnaryOp};
 #[cfg(feature = "master")]
 use rustc_abi::ExternAbi;
 use rustc_abi::{BackendRepr, HasDataLayout, WrappingRange};
-use rustc_codegen_ssa::MemFlags;
 use rustc_codegen_ssa::base::wants_msvc_seh;
 use rustc_codegen_ssa::common::IntPredicate;
 use rustc_codegen_ssa::errors::InvalidMonomorphization;
@@ -22,6 +21,7 @@ use rustc_codegen_ssa::traits::{
     ArgAbiBuilderMethods, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
     IntrinsicCallBuilderMethods, LayoutTypeCodegenMethods,
 };
+use rustc_codegen_ssa::{MemFlags, RetagFlags};
 use rustc_data_structures::fx::FxHashSet;
 #[cfg(feature = "master")]
 use rustc_middle::ty::layout::FnAbiOf;
@@ -730,6 +730,14 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
     fn va_end(&mut self, _va_list: RValue<'gcc>) -> RValue<'gcc> {
         // FIXME(antoyo): implement.
         self.context.new_rvalue_from_int(self.int_type, 0)
+    }
+
+    fn retag_reg(&mut self, _ptr: Self::Value, _info: RetagInfo) -> Self::Value {
+        unimplemented!();
+    }
+
+    fn retag_mem(&mut self, _place: Self::Value, _info: RetagInfo) {
+        unimplemented!();
     }
 }
 
