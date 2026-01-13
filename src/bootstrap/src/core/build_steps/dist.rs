@@ -24,6 +24,7 @@ use crate::core::build_steps::compile::{
 };
 use crate::core::build_steps::doc::DocumentationFormat;
 use crate::core::build_steps::gcc::GccTargetPair;
+use crate::core::build_steps::llvm::{get_llvm_version, get_llvm_version_suffix};
 use crate::core::build_steps::tool::{
     self, RustcPrivateCompilers, ToolTargetBuildMode, get_tool_target_compiler,
 };
@@ -2414,11 +2415,10 @@ fn install_llvm_file(
         // If we have a symlink like libLLVM-18.so -> libLLVM.so.18.1, install the target of the
         // symlink, which is what will actually get loaded at runtime.
         builder.install(&t!(fs::canonicalize(source)), destination, FileType::NativeLibrary);
-
         let full_dest = destination.join(source.file_name().unwrap());
         if install_symlink {
             // For download-ci-llvm, also install the symlink, to match what LLVM does. Using a
-            // symlink is fine here, as this is not a rustup component.
+            // symlink is fine here, as this is not a rustup component
             builder.copy_link(source, &full_dest, FileType::NativeLibrary);
         } else {
             // Otherwise, replace the symlink with an equivalent linker script. This is used when
@@ -2452,6 +2452,7 @@ fn install_llvm_file(
         fields(target = ?target, dst_libdir = ?dst_libdir, install_symlink = install_symlink),
     ),
 )]
+
 fn maybe_install_llvm(
     builder: &Builder<'_>,
     target: TargetSelection,
@@ -2490,13 +2491,28 @@ fn maybe_install_llvm(
         if llvm_dylib_path.exists() {
             builder.install(&llvm_dylib_path, dst_libdir, FileType::NativeLibrary);
         }
+        if builder.config.llvm_clang {
+            let clang_dylib_path = src_libdir.join("libclang-cpp.dylib");
+            let clang_cpp_dylib_path = src_libdir.join("libclang.dylib");
+            if clang_dylib_path.exists() {
+                builder.install(&clang_dylib_path, dst_libdir, FileType::NativeLibrary);
+            }
+            if clang_cpp_dylib_path.exists() {
+                builder.install(&clang_cpp_dylib_path, dst_libdir, FileType::NativeLibrary);
+            }
+
+            let src_header_dir = src_libdir.join("clang");
+            let dst_header_dir = dst_libdir.join("clang");
+            builder.create_dir(&dst_header_dir);
+            builder.cp_link_r(&src_header_dir, &dst_header_dir);
+        }
         !builder.config.dry_run()
     } else if let llvm::LlvmBuildStatus::AlreadyBuilt(llvm::LlvmResult {
         host_llvm_config, ..
     }) = llvm::prebuilt_llvm_config(builder, target, true)
     {
         trace!("LLVM already built, installing LLVM files");
-        let mut cmd = command(host_llvm_config);
+        let mut cmd = command(&host_llvm_config);
         cmd.cached();
         cmd.arg("--libfiles");
         builder.do_if_verbose(|| println!("running {cmd:?}"));
@@ -2511,6 +2527,37 @@ fn maybe_install_llvm(
                 PathBuf::from(file)
             };
             install_llvm_file(builder, &file, dst_libdir, install_symlink);
+        }
+        if builder.config.llvm_clang {
+            if builder.config.dry_run() {
+                return false;
+            }
+            let llvm_version_suffix = get_llvm_version_suffix(builder);
+            let version = get_llvm_version(builder, &host_llvm_config);
+            let components = version.split(".").collect::<Vec<_>>();
+            let major = components[0];
+            let minor = components[1];
+            // Helper to find the name of clang's shared library on darwin and linux.
+            let find_lib_name = |component: &str, extension: &str| match &llvm_version_suffix {
+                Some(version_suffix) => {
+                    format!("lib{component}{extension}.{major}.{minor}{version_suffix}")
+                }
+                None => format!("lib{component}.{extension}.{major}.{minor}"),
+            };
+            let src_libdir = builder.llvm_out(target).join("lib");
+            let clang_dylib_path = src_libdir.join(find_lib_name("clang", ".so"));
+            let clang_cpp_dylib_path = src_libdir.join(find_lib_name("clang-cpp", ".so"));
+            if clang_dylib_path.exists() {
+                install_llvm_file(builder, &clang_dylib_path, dst_libdir, install_symlink);
+            }
+            if clang_cpp_dylib_path.exists() {
+                install_llvm_file(builder, &clang_cpp_dylib_path, dst_libdir, install_symlink);
+            }
+
+            let src_header_dir = src_libdir.join("clang");
+            let dst_header_dir = dst_libdir.join("clang");
+            builder.create_dir(&dst_header_dir);
+            builder.cp_link_r(&src_header_dir, &dst_header_dir);
         }
         !builder.config.dry_run()
     } else {
