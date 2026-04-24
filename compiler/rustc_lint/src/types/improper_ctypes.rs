@@ -138,17 +138,16 @@ declare_lint_pass!(ImproperCTypesLint => [
     USES_POWER_ALIGNMENT
 ]);
 
-/// Getting the (normalized) type out of a field (for, e.g., an enum variant or a tuple).
-#[inline]
-fn get_type_from_field<'tcx>(
+/// A common pattern in this lint is to attempt normalize_erasing_regions,
+/// but keep the original type if it were to fail.
+/// This may or may not be supported in the logic behind the `Unnormalized` wrapper,
+/// (FIXME?)
+/// but it should be enough for non-wrapped types to be as normalised as this lint needs them to be.
+fn maybe_normalize_erasing_regions<'tcx>(
     cx: &LateContext<'tcx>,
-    field: &ty::FieldDef,
-    args: GenericArgsRef<'tcx>,
+    value: Unnormalized<'tcx, Ty<'tcx>>,
 ) -> Ty<'tcx> {
-    let field_ty = field.ty(cx.tcx, args);
-    cx.tcx
-        .try_normalize_erasing_regions(cx.typing_env(), Unnormalized::new_wip(field_ty))
-        .unwrap_or(field_ty)
+    cx.tcx.try_normalize_erasing_regions(cx.typing_env(), value).unwrap_or(value.skip_norm_wip())
 }
 
 /// Check a variant of a non-exhaustive enum for improper ctypes
@@ -464,8 +463,17 @@ struct ImproperCTypesVisitor<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
-    fn new(cx: &'a LateContext<'tcx>, base_ty: Ty<'tcx>, base_fn_mode: CItemKind) -> Self {
-        ImproperCTypesVisitor { cx, base_ty, base_fn_mode, cache: FxHashSet::default() }
+    fn new(
+        cx: &'a LateContext<'tcx>,
+        base_ty: Unnormalized<'tcx, Ty<'tcx>>,
+        base_fn_mode: CItemKind,
+    ) -> Self {
+        ImproperCTypesVisitor {
+            cx,
+            base_ty: maybe_normalize_erasing_regions(cx, base_ty),
+            base_fn_mode,
+            cache: FxHashSet::default(),
+        }
     }
 
     /// Checks if the given indirection (box,ref,pointer) is "ffi-safe".
@@ -554,7 +562,10 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         let transparent_with_all_zst_fields = if def.repr().transparent() {
             if let Some(field) = super::transparent_newtype_field(self.cx.tcx, variant) {
                 // Transparent newtypes have at most one non-ZST field which needs to be checked..
-                let field_ty = get_type_from_field(self.cx, field, args);
+                let field_ty = maybe_normalize_erasing_regions(
+                    self.cx,
+                    Unnormalized::new_wip(field.ty(self.cx.tcx, args)),
+                );
                 match self.visit_type(state.next(ty), field_ty) {
                     FfiUnsafe { ty, .. } if ty.is_unit() => (),
                     r => return r,
@@ -573,7 +584,10 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         // We can't completely trust `repr(C)` markings, so make sure the fields are actually safe.
         let mut all_phantom = !variant.fields.is_empty();
         for field in &variant.fields {
-            let field_ty = get_type_from_field(self.cx, field, args);
+            let field_ty = maybe_normalize_erasing_regions(
+                self.cx,
+                Unnormalized::new_wip(field.ty(self.cx.tcx, args)),
+            );
             all_phantom &= match self.visit_type(state.next(ty), field_ty) {
                 FfiSafe => false,
                 // `()` fields are FFI-safe!
@@ -927,12 +941,12 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         })
     }
 
-    fn check_type(&mut self, state: VisitorState, ty: Ty<'tcx>) -> FfiResult<'tcx> {
-        let ty = self
-            .cx
-            .tcx
-            .try_normalize_erasing_regions(self.cx.typing_env(), Unnormalized::new_wip(ty))
-            .unwrap_or(ty);
+    fn check_type(
+        &mut self,
+        state: VisitorState,
+        ty: Unnormalized<'tcx, Ty<'tcx>>,
+    ) -> FfiResult<'tcx> {
+        let ty = maybe_normalize_erasing_regions(self.cx, ty);
         if let Some(res) = self.visit_for_opaque_ty(ty) {
             return res;
         }
@@ -990,6 +1004,7 @@ impl<'tcx> ImproperCTypesLint {
 
         let all_types = iter::zip(visitor.tys.drain(..), visitor.spans.drain(..));
         for (fn_ptr_ty, span) in all_types {
+            let fn_ptr_ty = Unnormalized::new_wip(fn_ptr_ty);
             let mut visitor = ImproperCTypesVisitor::new(cx, fn_ptr_ty, fn_mode);
             // FIXME(ctypes): make a check_for_fnptr
             let ffi_res = visitor.check_type(state, fn_ptr_ty);
@@ -1039,7 +1054,7 @@ impl<'tcx> ImproperCTypesLint {
     }
 
     fn check_foreign_static(&mut self, cx: &LateContext<'tcx>, id: hir::OwnerId, span: Span) {
-        let ty = cx.tcx.type_of(id).instantiate_identity().skip_norm_wip();
+        let ty = cx.tcx.type_of(id).instantiate_identity();
         let mut visitor = ImproperCTypesVisitor::new(cx, ty, CItemKind::Declaration);
         let ffi_res = visitor.check_type(VisitorState::static_entry_point(), ty);
         self.process_ffi_result(cx, span, ffi_res, CItemKind::Declaration);
@@ -1057,16 +1072,18 @@ impl<'tcx> ImproperCTypesLint {
         let sig = cx.tcx.instantiate_bound_regions_with_erased(sig);
 
         for (input_ty, input_hir) in iter::zip(sig.inputs(), decl.inputs) {
+            let input_ty = Unnormalized::new_wip(*input_ty);
             let state = VisitorState::fn_entry_point(fn_mode, FnPos::Arg);
-            let mut visitor = ImproperCTypesVisitor::new(cx, *input_ty, fn_mode);
-            let ffi_res = visitor.check_type(state, *input_ty);
+            let mut visitor = ImproperCTypesVisitor::new(cx, input_ty, fn_mode);
+            let ffi_res = visitor.check_type(state, input_ty);
             self.process_ffi_result(cx, input_hir.span, ffi_res, fn_mode);
         }
 
         if let hir::FnRetTy::Return(ret_hir) = decl.output {
+            let output_ty = Unnormalized::new_wip(sig.output());
             let state = VisitorState::fn_entry_point(fn_mode, FnPos::Ret);
-            let mut visitor = ImproperCTypesVisitor::new(cx, sig.output(), fn_mode);
-            let ffi_res = visitor.check_type(state, sig.output());
+            let mut visitor = ImproperCTypesVisitor::new(cx, output_ty, fn_mode);
+            let ffi_res = visitor.check_type(state, output_ty);
             self.process_ffi_result(cx, ret_hir.span, ffi_res, fn_mode);
         }
     }
