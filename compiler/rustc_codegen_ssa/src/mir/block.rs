@@ -23,7 +23,6 @@ use super::{CachedLlbb, FunctionCx, LocalRef};
 use crate::base::{self, is_call_from_compiler_builtins_to_upstream_monomorphization};
 use crate::common::{self, IntPredicate};
 use crate::errors::CompilerBuiltinsCannotCall;
-use crate::mir::retag;
 use crate::traits::*;
 use crate::{MemFlags, meth};
 
@@ -265,7 +264,7 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
                 }
                 fx.store_return(bx, ret_dest, &fn_abi.ret, invokeret);
 
-                // If the return value has variants that needed to be retagged,
+                // If the return value was retagged as it was stored,
                 // then we might be in a different basic block now.
                 // Update the cached block for `target` to point to this new
                 // block, where codegen will continue.
@@ -1061,26 +1060,22 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             let result_layout =
                 self.cx.layout_of(self.monomorphized_place_ty(destination.as_ref()));
 
-            let needs_retag = retag::place_needs_retag(&destination);
-
             let return_dest = if result_layout.is_zst() {
                 ReturnDest::Nothing
             } else if let Some(index) = destination.as_local() {
                 match self.locals[index] {
-                    LocalRef::Place(dest) => ReturnDest::Store { dest, needs_retag },
+                    LocalRef::Place(dest) => ReturnDest::Store { dest },
                     LocalRef::UnsizedPlace(_) => bug!("return type must be sized"),
                     LocalRef::PendingOperand => {
                         // Handle temporary places, specifically `Operand` ones, as
                         // they don't have `alloca`s.
-                        ReturnDest::DirectOperand { index, needs_retag }
+                        ReturnDest::DirectOperand { index }
                     }
                     LocalRef::Operand(_) => bug!("place local already assigned to"),
                 }
             } else {
-                ReturnDest::Store {
-                    dest: self.codegen_place(bx, destination.as_ref()),
-                    needs_retag,
-                }
+                let dest = self.codegen_place(bx, destination.as_ref());
+                ReturnDest::Store { dest }
             };
 
             let args =
@@ -2110,8 +2105,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             return ReturnDest::Nothing;
         }
 
-        let needs_retag = retag::place_needs_retag(&dest);
-
         let dest = if let Some(index) = dest.as_local() {
             match self.locals[index] {
                 LocalRef::Place(dest) => dest,
@@ -2125,9 +2118,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let tmp = PlaceRef::alloca(bx, fn_ret.layout);
                         tmp.storage_live(bx);
                         llargs.push(tmp.val.llval);
-                        ReturnDest::IndirectOperand { tmp, index, needs_retag }
+                        ReturnDest::IndirectOperand { tmp, index }
                     } else {
-                        ReturnDest::DirectOperand { index, needs_retag }
+                        ReturnDest::DirectOperand { index }
                     };
                 }
                 LocalRef::Operand(_) => {
@@ -2150,7 +2143,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             llargs.push(dest.val.llval);
             ReturnDest::Nothing
         } else {
-            ReturnDest::Store { dest, needs_retag }
+            ReturnDest::Store { dest }
         }
     }
 
@@ -2166,22 +2159,22 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         let retags_enabled = bx.tcx().sess.opts.unstable_opts.codegen_emit_retag.is_some();
         match dest {
             Nothing => (),
-            Store { dest, needs_retag } => {
+            Store { dest } => {
                 bx.store_arg(ret_abi, llval, dest);
-                if retags_enabled && needs_retag {
+                if retags_enabled {
                     self.codegen_retag_place(bx, dest, false);
                 }
             }
-            IndirectOperand { tmp, index, needs_retag } => {
+            IndirectOperand { tmp, index } => {
                 let mut op = bx.load_operand(tmp);
-                if retags_enabled && needs_retag {
+                if retags_enabled {
                     op = self.codegen_retag_operand(bx, op, false);
                 }
                 tmp.storage_dead(bx);
                 self.overwrite_local(index, LocalRef::Operand(op));
                 self.debug_introduce_local(bx, index);
             }
-            DirectOperand { index, needs_retag } => {
+            DirectOperand { index } => {
                 // If there is a cast, we have to store and reload.
                 let mut op = if let PassMode::Cast { .. } = ret_abi.mode {
                     let tmp = PlaceRef::alloca(bx, ret_abi.layout);
@@ -2193,7 +2186,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 } else {
                     OperandRef::from_immediate_or_packed_pair(bx, llval, ret_abi.layout)
                 };
-                if retags_enabled && needs_retag {
+                if retags_enabled {
                     op = self.codegen_retag_operand(bx, op, false);
                 }
                 self.overwrite_local(index, LocalRef::Operand(op));
@@ -2210,8 +2203,6 @@ enum ReturnDest<'tcx, V> {
     Store {
         /// The destination place
         dest: PlaceRef<'tcx, V>,
-        /// If this place needs to be retagged
-        needs_retag: bool,
     },
     /// Store an indirect return value to an operand local place.
     IndirectOperand {
@@ -2219,15 +2210,11 @@ enum ReturnDest<'tcx, V> {
         tmp: PlaceRef<'tcx, V>,
         /// The local that it is assigned to
         index: mir::Local,
-        /// If this local needs to be retagged after the assignment
-        needs_retag: bool,
     },
     /// Store a direct return value to an operand local place.
     DirectOperand {
         /// The destination local
         index: mir::Local,
-        /// If this local needs to be retagged after the assignment.
-        needs_retag: bool,
     },
 }
 
