@@ -263,7 +263,6 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
                     bx.lifetime_end(tmp, size);
                 }
                 fx.store_return(bx, ret_dest, &fn_abi.ret, invokeret);
-
                 // If the return value was retagged as it was stored,
                 // then we might be in a different basic block now.
                 // Update the cached block for `target` to point to this new
@@ -1064,18 +1063,17 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 ReturnDest::Nothing
             } else if let Some(index) = destination.as_local() {
                 match self.locals[index] {
-                    LocalRef::Place(dest) => ReturnDest::Store { dest },
+                    LocalRef::Place(dest) => ReturnDest::Store(dest),
                     LocalRef::UnsizedPlace(_) => bug!("return type must be sized"),
                     LocalRef::PendingOperand => {
                         // Handle temporary places, specifically `Operand` ones, as
                         // they don't have `alloca`s.
-                        ReturnDest::DirectOperand { index }
+                        ReturnDest::DirectOperand(index)
                     }
                     LocalRef::Operand(_) => bug!("place local already assigned to"),
                 }
             } else {
-                let dest = self.codegen_place(bx, destination.as_ref());
-                ReturnDest::Store { dest }
+                ReturnDest::Store(self.codegen_place(bx, destination.as_ref()))
             };
 
             let args =
@@ -2118,9 +2116,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let tmp = PlaceRef::alloca(bx, fn_ret.layout);
                         tmp.storage_live(bx);
                         llargs.push(tmp.val.llval);
-                        ReturnDest::IndirectOperand { tmp, index }
+                        ReturnDest::IndirectOperand(tmp, index)
                     } else {
-                        ReturnDest::DirectOperand { index }
+                        ReturnDest::DirectOperand(index)
                     };
                 }
                 LocalRef::Operand(_) => {
@@ -2143,7 +2141,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             llargs.push(dest.val.llval);
             ReturnDest::Nothing
         } else {
-            ReturnDest::Store { dest }
+            ReturnDest::Store(dest)
         }
     }
 
@@ -2157,15 +2155,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     ) {
         use self::ReturnDest::*;
         let retags_enabled = bx.tcx().sess.opts.unstable_opts.codegen_emit_retag.is_some();
+
         match dest {
             Nothing => (),
-            Store { dest } => {
-                bx.store_arg(ret_abi, llval, dest);
+            Store(dst) => {
+                bx.store_arg(ret_abi, llval, dst);
                 if retags_enabled {
-                    self.codegen_retag_place(bx, dest, false);
+                    self.codegen_retag_place(bx, dst, false);
                 }
             }
-            IndirectOperand { tmp, index } => {
+            IndirectOperand(tmp, index) => {
                 let mut op = bx.load_operand(tmp);
                 if retags_enabled {
                     op = self.codegen_retag_operand(bx, op, false);
@@ -2174,7 +2173,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 self.overwrite_local(index, LocalRef::Operand(op));
                 self.debug_introduce_local(bx, index);
             }
-            DirectOperand { index } => {
+            DirectOperand(index) => {
                 // If there is a cast, we have to store and reload.
                 let mut op = if let PassMode::Cast { .. } = ret_abi.mode {
                     let tmp = PlaceRef::alloca(bx, ret_abi.layout);
@@ -2200,22 +2199,11 @@ enum ReturnDest<'tcx, V> {
     /// Do nothing; the return value is indirect or ignored.
     Nothing,
     /// Store the return value to the pointer.
-    Store {
-        /// The destination place
-        dest: PlaceRef<'tcx, V>,
-    },
+    Store(PlaceRef<'tcx, V>),
     /// Store an indirect return value to an operand local place.
-    IndirectOperand {
-        /// The temp place where the value is loaded from
-        tmp: PlaceRef<'tcx, V>,
-        /// The local that it is assigned to
-        index: mir::Local,
-    },
+    IndirectOperand(PlaceRef<'tcx, V>, mir::Local),
     /// Store a direct return value to an operand local place.
-    DirectOperand {
-        /// The destination local
-        index: mir::Local,
-    },
+    DirectOperand(mir::Local),
 }
 
 fn load_cast<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
