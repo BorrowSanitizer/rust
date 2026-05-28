@@ -972,21 +972,22 @@ impl<'ll> CodegenCx<'ll, '_> {
 
                 (fn_ty, f)
             }
-            // Experimental retag intrinsics.
-            // This form is used to retag a pointer that has already been stored in a register. It receives
-            // the pointer and returns an alias with the same address, but different provenance.
-            "__rust_retag_reg" => {
+            // Experimental retag and taint marking intrinsics.
+            // This form is used to retag or mark a pointer that has already been stored in a register. It receives
+            // the pointer and returns an alias with the same address (but different provenance, if this is a retag).
+            "__rust_retag_reg" | "__rust_taint_reg" => {
                 let fn_ty = self.type_func(type_params, self.type_ptr());
                 let llfn = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
                 let nounwind = llvm::AttributeKind::NoUnwind.create_attr(self.llcx);
                 attributes::apply_to_llfn(llfn, llvm::AttributePlace::Function, &[nounwind]);
                 (fn_ty, llfn)
             }
-            // This form is used to retag a pointer that is stored in another place. It receives a pointer to the
-            // place and returns `void`. This communicates the indirection  without requiring an explicit load and
-            // store. If we used the `reg` form instead, then we would need to load the place, retag it, and then
-            // store the result back, which would be undefined behavior for `readonly` places.
-            "__rust_retag_mem" => {
+            // This form is used to retag or mark a pointer that is stored in another place. It receives a pointer to the
+            // place and returns `void`. For retags, this communicates the indirection  without requiring an explicit load 
+            // and store. If we used the `reg` form instead, then we would need to load the place, retag it, and then
+            // store the result back, which would be undefined behavior for `readonly` places. For taint marking, this
+            // indicates that all values that have a memory dependence on this place are tainted. 
+            "__rust_retag_mem" | "__rust_taint_mem" => {
                 let fn_ty = self.type_func(type_params, self.type_void());
                 let llfn = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
                 let nounwind = llvm::AttributeKind::NoUnwind.create_attr(self.llcx);

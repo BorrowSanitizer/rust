@@ -1056,6 +1056,14 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
     fn retag_mem(&mut self, ptr: Self::Value, info: &RetagInfo<Self::Value>) {
         codegen_retag_inner(self, "__rust_retag_mem", ptr, info);
     }
+
+    fn taint_mem(&mut self, place: Self::Value) {
+        self.call_intrinsic("__rust_taint_mem", &[self.type_ptr()], &[place]);
+    }
+
+    fn taint_reg(&mut self, ptr: Self::Value) -> Self::Value {
+        self.call_intrinsic("__rust_taint_reg", &[self.type_ptr()], &[ptr])
+    }
 }
 
 fn llvm_arch_for(rust_arch: &Arch) -> Option<&'static str> {

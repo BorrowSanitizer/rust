@@ -2269,6 +2269,8 @@ options! {
         "the backend to use"),
     codegen_emit_retag: Option<CodegenRetagOptions> = (None, parse_codegen_retag_options, [TRACKED],
         "emit retag function calls in generated code"),
+    codegen_emit_taint: bool = (false, parse_bool, [TRACKED],
+        "emit experimental taint markers in generated code (default: no)"),
     codegen_source_order: bool = (false, parse_bool, [UNTRACKED],
         "emit mono items in the order of spans in source files (default: no)"),
     contract_checks: Option<bool> = (None, parse_opt_bool, [TRACKED],

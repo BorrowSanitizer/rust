@@ -278,6 +278,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             )
         }
 
+        let mut operand = operand;
+        operand.val = self.codegen_taint_operand(bx, operand.val);
+
         let cx = bx.cx();
         match (operand.val, operand.layout.backend_repr, cast.backend_repr) {
             _ if cast.is_zst() => OperandValue::ZeroSized,
@@ -423,7 +426,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                                     args,
                                 )
                                 .unwrap();
-                                OperandValue::Immediate(bx.get_fn_addr(instance))
+                                self.codegen_taint_operand(bx, OperandValue::Immediate(bx.cx().get_fn_addr(instance)))
                             }
                             _ => bug!("{} cannot be reified to a fn ptr", operand.layout.ty),
                         }
@@ -437,14 +440,14 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                                     args,
                                     ty::ClosureKind::FnOnce,
                                 );
-                                OperandValue::Immediate(bx.cx().get_fn_addr(instance))
+                                self.codegen_taint_operand(bx, OperandValue::Immediate(bx.cx().get_fn_addr(instance)))
                             }
                             _ => bug!("{} cannot be cast to a fn ptr", operand.layout.ty),
                         }
                     }
                     mir::CastKind::PointerCoercion(PointerCoercion::UnsafeFnPointer, _) => {
                         // This is a no-op at the LLVM level.
-                        operand.val
+                        self.codegen_taint_operand(bx, operand.val)
                     }
                     mir::CastKind::PointerCoercion(PointerCoercion::Unsize, _) => {
                         assert!(bx.cx().is_backend_scalar_pair(cast));
@@ -740,7 +743,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let operand = self.codegen_operand(bx, operand);
                 let binder_ty = self.monomorphize(binder_ty);
                 let layout = bx.cx().layout_of(binder_ty);
-                OperandRef { val: operand.val, layout, move_annotation: None }
+                OperandRef {
+                    val: self.codegen_taint_operand(bx, operand.val),
+                    layout,
+                    move_annotation: None,
+                }
             }
 
             mir::Rvalue::CopyForDeref(_) => bug!("`CopyForDeref` in codegen"),
@@ -767,11 +774,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             "Address of place was unexpectedly {val:?} for pointee type {ty:?}",
         );
 
-        OperandRef {
-            val,
-            layout: self.cx.layout_of(mk_ptr_ty(self.cx.tcx(), ty)),
-            move_annotation: None,
-        }
+        let ty = mk_ptr_ty(self.cx.tcx(), ty);
+
+        let val = if ty.is_raw_ptr() { self.codegen_taint_operand(bx, val) } else { val };
+
+        OperandRef { val, layout: self.cx.layout_of(ty), move_annotation: None }
     }
 
     fn codegen_scalar_binop(

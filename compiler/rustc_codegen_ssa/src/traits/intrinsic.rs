@@ -54,4 +54,6 @@ pub trait IntrinsicCallBuilderMethods<'tcx>: BackendTypes {
     fn retag_mem(&mut self, place: Self::Value, info: &RetagInfo<Self::Value>);
     /// Trait method used to retag a pointer that has been loaded into a register.
     fn retag_reg(&mut self, ptr: Self::Value, info: &RetagInfo<Self::Value>) -> Self::Value;
+    fn taint_mem(&mut self, ptr: Self::Value);
+    fn taint_reg(&mut self, ptr: Self::Value) -> Self::Value;
 }
