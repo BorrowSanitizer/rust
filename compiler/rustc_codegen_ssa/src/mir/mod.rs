@@ -27,6 +27,7 @@ pub mod place;
 mod retag;
 mod rvalue;
 mod statement;
+mod taint;
 
 pub use self::block::store_cast;
 use self::debuginfo::{FunctionDebugContext, PerLocalVarDebugInfo};

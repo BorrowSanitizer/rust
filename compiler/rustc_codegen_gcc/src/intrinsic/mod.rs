@@ -716,6 +716,14 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
     fn retag_mem(&mut self, _ptr: Self::Value, _info: &RetagInfo<Self::Value>) {
         unimplemented!()
     }
+
+    fn taint_mem(&mut self, _place: Self::Value) {
+        unimplemented!();
+    }
+
+    fn taint_reg(&mut self, _ptr: Self::Value) -> Self::Value {
+        unimplemented!();
+    }
 }
 
 impl<'a, 'gcc, 'tcx> ArgAbiBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tcx> {
