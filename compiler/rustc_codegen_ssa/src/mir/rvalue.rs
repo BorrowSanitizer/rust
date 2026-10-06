@@ -511,6 +511,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let llptr = operand.immediate();
                         let llcast_ty = bx.cx().immediate_backend_type(cast);
                         let lladdr = bx.ptrtoint(llptr, llcast_ty);
+                        if bx.tcx().sess.opts.unstable_opts.codegen_emit_retag.is_some() {
+                            bx.expose(llptr);
+                        }
                         OperandValue::Immediate(lladdr)
                     }
                     mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_), _) => {
