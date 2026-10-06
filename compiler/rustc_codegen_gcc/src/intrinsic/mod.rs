@@ -720,6 +720,10 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
     fn retag_mem(&mut self, _ptr: Self::Value, _info: &RetagInfo<Self::Value>) {
         unimplemented!()
     }
+
+    fn expose(&mut self, _ptr: Self::Value) {
+        unimplemented!()
+    }
 }
 
 impl<'a, 'gcc, 'tcx> ArgAbiBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tcx> {

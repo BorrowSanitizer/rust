@@ -1138,7 +1138,7 @@ impl<'ll> CodegenCx<'ll, '_> {
             // place and returns `void`. This communicates the indirection  without requiring an explicit load and
             // store. If we used the `reg` form instead, then we would need to load the place, retag it, and then
             // store the result back, which would be undefined behavior for `readonly` places.
-            "__rust_retag_mem" => {
+            "__rust_retag_mem" | "__rust_expose" => {
                 let fn_ty = self.type_func(type_params, self.type_void());
                 let llfn = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
                 let nounwind = llvm::AttributeKind::NoUnwind.create_attr(self.llcx);

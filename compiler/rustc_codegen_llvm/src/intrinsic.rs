@@ -1073,6 +1073,10 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
     fn retag_mem(&mut self, ptr: Self::Value, info: &RetagInfo<Self::Value>) {
         codegen_retag_inner(self, "__rust_retag_mem", ptr, info);
     }
+
+    fn expose(&mut self, ptr: Self::Value) {
+        self.call_intrinsic("__rust_expose", &[self.val_ty(ptr)], &[ptr]);
+    }
 }
 
 fn llvm_arch_for(rust_arch: &Arch) -> Option<&'static str> {
