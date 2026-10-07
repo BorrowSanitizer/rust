@@ -880,6 +880,7 @@ impl<'a, 'tcx, V: CodegenObject> OperandRefBuilder<'tcx, V> {
             OperandValueBuilder::Pair(_, snd @ Either::Right(_)) if !is_zero_offset => {
                 *snd = Either::Left(imm);
             }
+            // FIXME: - should we allow inserting vector operands?
             _ => bug!("Tried to insert {imm:?} into field {f:?} of {self:?}"),
         }
     }
@@ -888,8 +889,8 @@ impl<'a, 'tcx, V: CodegenObject> OperandRefBuilder<'tcx, V> {
     /// with the value `imm`. A value must already be present.
     ///
     /// This is used along with [`Self::from_existing`] to perform in-place updates
-    /// of any operand.
-    pub(super) fn update_imm(&mut self, offset: Size, imm: V) {
+    /// of any operand. Unlike `insert_imm`, this method supports replacing vector values.
+    pub(super) fn update(&mut self, offset: Size, imm: V) {
         let is_zero_offset = offset == Size::ZERO;
         match &mut self.val {
             OperandValueBuilder::Immediate(val @ Either::Left(_)) if is_zero_offset => {
@@ -900,6 +901,9 @@ impl<'a, 'tcx, V: CodegenObject> OperandRefBuilder<'tcx, V> {
             }
             OperandValueBuilder::Pair(_, snd @ Either::Left(_)) if !is_zero_offset => {
                 *snd = Either::Left(imm);
+            }
+            OperandValueBuilder::Vector(val @ Either::Left(_)) if is_zero_offset => {
+                *val = Either::Left(imm);
             }
             _ => bug!("Tried to update {imm:?} at offset {offset:?} of {self:?}"),
         }
