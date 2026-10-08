@@ -1,0 +1,21 @@
+change-id = 154587
+
+[build]
+build-stage = 2
+extended = true
+docs = false
+sanitizers = true
+
+[llvm]
+download-ci-llvm = true
+
+[rust]
+channel = "nightly"
+download-rustc = false
+lld = true
+llvm-bitcode-linker = true
+omit-git-hash = false
+
+[dist]
+compression-profile = "balanced"
+src-tarball = false
