@@ -5,6 +5,8 @@
 //! describes which pointers within the place or operand can be retagged. Then, we traverse
 //! the [`RetagPlan`] to emit the calls.
 
+use std::fmt;
+
 use rustc_abi::{Endian, FieldIdx, FieldsShape, Size, VariantIdx, Variants};
 use rustc_ast::Mutability;
 use rustc_data_structures::fx::FxIndexMap;
@@ -214,19 +216,13 @@ impl<'a, 'tcx, V> RetagPlan<V> {
         if is_mutable {
             // Everything is `UnsafePinned` if the collected ranges
             // cover the entire size of the layout.
-            if matches!(
-                pin_ranges.as_slice(),
-                [(Size::ZERO, size)] if *size == pointee_layout.size,
-            ) {
+            if pin_ranges.is_contiguous() {
                 return None;
             }
         }
 
         let im_ranges = UnsafeCellRanges::collect(bx, pointee_layout, retag_opts.no_precise_im);
-        let all_im = matches!(
-            im_ranges.as_slice(),
-            [(Size::ZERO, size)] if *size == pointee_layout.size,
-        );
+        let all_im = im_ranges.is_contiguous();
 
         let pin_layout = Self::alloc_ranges(bx, pin_ranges);
 
@@ -256,37 +252,221 @@ impl<'a, 'tcx, V> RetagPlan<V> {
     /// Creates a pointer to a global static allocation containing adjacent pairs of `u64` bytes,
     /// which indicate the offset and width of a range within the layout of a type. Returns a null
     /// pointer if the list of ranges is empty.
-    fn alloc_ranges<Bx: BuilderMethods<'a, 'tcx>>(
-        bx: &mut Bx,
-        ranges: Vec<(Size, Size)>,
-    ) -> Bx::Value {
-        let tcx = bx.tcx();
+    fn alloc_ranges<Bx: BuilderMethods<'a, 'tcx>>(bx: &mut Bx, ranges: RangeChunks) -> Bx::Value {
         if ranges.is_empty() {
             return bx.const_null(bx.type_ptr());
         }
-
-        let mut bytes: Vec<u8> = vec![];
-        for (offset, width) in ranges.iter() {
-            // Use the endianness of the target that we are
-            // compiling for, since that's what's going to be
-            // reading the contents of this array. At the moment, we use
-            // 64-bit integers for each value, regardless of the architecture.
-            match tcx.data_layout.endian {
-                Endian::Little => {
-                    bytes.extend_from_slice(&offset.bytes().to_le_bytes());
-                    bytes.extend_from_slice(&width.bytes().to_le_bytes());
-                }
-                Endian::Big => {
-                    bytes.extend_from_slice(&offset.bytes().to_be_bytes());
-                    bytes.extend_from_slice(&width.bytes().to_be_bytes());
-                }
-            }
-        }
-
+        let tcx = bx.tcx();
+        let bytes = ranges.into_bytes(tcx.data_layout.endian);
         let align = tcx.data_layout.i64_align;
+        assert!(bytes.len() % align.bytes_usize() == 0);
         let alloc = Allocation::from_bytes(&bytes, align, Mutability::Not, ());
         let const_alloc = tcx.mk_const_alloc(alloc);
         bx.cx().static_addr_of(const_alloc, None)
+    }
+}
+
+struct Encoder {
+    endian: Endian,
+    out: Vec<u8>,
+}
+
+impl Encoder {
+    fn new(endian: Endian) -> Self {
+        Self { endian, out: vec![] }
+    }
+
+    fn word(&mut self, val: u64) {
+        match self.endian {
+            Endian::Little => self.out.extend_from_slice(&val.to_le_bytes()),
+            Endian::Big => self.out.extend_from_slice(&val.to_be_bytes()),
+        };
+    }
+}
+
+enum RangeChunk {
+    Ranges(RangeSet<Size>),
+    Repeat { base: Size, stride: Size, count: u64, lookahead: usize },
+}
+
+impl RangeChunk {
+    const CMD_END: u64 = 0;
+    const CMD_RANGES: u64 = 1;
+    const CMD_REPEAT: u64 = 2;
+    fn encode(&self, enc: &mut Encoder) {
+        match self {
+            RangeChunk::Ranges(range_set) => {
+                enc.word(Self::CMD_RANGES);
+                enc.word(range_set.0.len() as u64);
+                for (offset, width) in range_set.0.iter() {
+                    enc.word(offset.bytes());
+                    enc.word(width.bytes());
+                }
+            }
+            RangeChunk::Repeat { stride, count, lookahead, .. } => {
+                enc.word(Self::CMD_REPEAT);
+                enc.word(stride.bytes());
+                enc.word(*count);
+                enc.word(*lookahead as u64);
+            }
+        }
+    }
+}
+
+impl fmt::Debug for RangeChunk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RangeChunk::Repeat { base, stride, count, lookahead } => {
+                write!(f, "R({base:?}, {stride:?}, {count:?}, {lookahead:?})")?;
+            }
+            RangeChunk::Ranges(info) => {
+                for (offset, size) in &info.0 {
+                    write!(f, "[{offset:?}, {size:?}]")?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A list of range sets. This helper struct is used
+/// to collect a set of ranges within a type that satisfy
+/// a predicate.
+///
+/// For large types, this list becomes quite long.
+/// To avoid emitting a massive constant array, we
+/// compress the ranges. Instead of emitting a single
+/// set of ranges for each element of an array, we emit
+/// the ranges for one element, and then an additional
+/// instruction indicating that these ranges should be
+/// repeated for the length of the array.
+struct RangeChunks {
+    chunks: Vec<RangeChunk>,
+    current_chunk: Option<RangeSet<Size>>,
+    size: Size,
+}
+
+impl RangeChunks {
+    fn new(size: Size) -> Self {
+        RangeChunks { size, current_chunk: None, chunks: Vec::new() }
+    }
+
+    fn is_empty(&self) -> bool {
+        // We only push a chunk that contains at least one
+        // valid range.
+        self.chunks.is_empty() && self.current_chunk.is_none()
+    }
+
+    fn into_bytes(self, endian: Endian) -> Vec<u8> {
+        let mut dest = Encoder::new(endian);
+        for chunk in self.collect() {
+            chunk.encode(&mut dest);
+        }
+        dest.word(RangeChunk::CMD_END);
+        dest.out
+    }
+
+    fn collect(mut self) -> Vec<RangeChunk> {
+        if let Some(chunk) = self.current_chunk {
+            self.chunks.push(RangeChunk::Ranges(chunk));
+        }
+        self.chunks
+    }
+
+    /// Returns `true` if this set of "chunks" represents
+    /// a contiguous range of bytes.
+    fn is_contiguous(&self) -> bool {
+        let ranges = if self.chunks.is_empty()
+            && let Some(ranges) = self.current_chunk.as_ref()
+        {
+            ranges
+        } else if self.current_chunk.is_none()
+            && let [RangeChunk::Ranges(ranges)] = self.chunks.as_slice()
+        {
+            ranges
+        } else {
+            return false;
+        };
+        matches!(ranges.0.last(), Some((Size::ZERO, len)) if *len == self.size)
+    }
+
+    fn ensure_chunk(&mut self) -> &mut RangeSet<Size> {
+        self.current_chunk.get_or_insert_with(RangeSet::<Size>::new)
+    }
+
+    fn add_range(&mut self, offset: Size, size: Size) {
+        if size > Size::ZERO {
+            self.ensure_chunk().add_range(offset, size);
+        }
+    }
+
+    fn repeat(&mut self, child: RangeChunks, offset: Size, count: u64, stride: Size) {
+        if count == 0 {
+            return;
+        }
+
+        let mut chunks = child.collect();
+        let [head, tail @ ..] = chunks.as_mut_slice() else {
+            return;
+        };
+
+        if let RangeChunk::Ranges(info) = head
+            && tail.is_empty()
+        {
+            // We have a single range.
+            if let [(base, inner_size)] = info.0.as_mut_slice()
+                && *base == offset
+                && *inner_size == stride
+            {
+                // If the entire width of the array is included, then we do not need to
+                // emit an explicit repeat. We can emit a single range covering the size
+                // of the array.
+                self.add_range(offset, *inner_size * count);
+                return;
+            }
+            if count == 1 {
+                // There are multiple ranges, but only one chunk.
+                // This happens for a single-element array. We can
+                // merge these ranges in with the previous chunk, and
+                // return without needing to repeat.
+                let dest_chunk = self.ensure_chunk();
+                for (offset, size) in &info.0 {
+                    dest_chunk.add_range(*offset, *size);
+                }
+                return;
+            }
+        }
+        // If we've made it here, then there needs to be an explicit
+        // repeat *somewhere*. We have a non-contiguous set of ranges.
+
+        if let Some(current) = self.current_chunk.take() {
+            self.chunks.push(RangeChunk::Ranges(current));
+        }
+
+        if let RangeChunk::Repeat { base, stride: inner_stride, count: inner_count, lookahead } = head
+            // The array has no prefix padding.
+            && *base == offset
+            // The width of the inner array is equal to the width of
+            // each element of the outer array.
+            && (*inner_stride) * (*inner_count) == stride
+            // The number of chunks repeated is the number of remaining
+            // chunks being merged. 
+            && *lookahead == tail.len()
+        {
+            // Multiply the count instead of emitting an explicit repeat.
+            // This makes it so that `[[T; N]; M]` is always `[T; M * N]`
+            *inner_count *= count;
+        } else if count > 1 {
+            // We only need an explicit repeat if there's
+            // more than one element that needs to be included.
+            self.chunks.push(RangeChunk::Repeat {
+                base: offset,
+                stride,
+                count,
+                lookahead: chunks.len(),
+            });
+        }
+        self.chunks.extend(chunks);
     }
 }
 
@@ -309,7 +489,7 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
         bx: &mut Bx,
         offset: Size,
         limit: Size,
-        ranges: &mut RangeSet<Size>,
+        ranges: &mut RangeChunks,
         layout: TyAndLayout<'tcx>,
         imprecise: bool,
     ) {
@@ -325,12 +505,19 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
             return ranges.add_range(offset, layout.size);
         }
 
+        let has_multiple_variants = matches!(layout.variants, Variants::Multiple { .. });
+
+        if Self::contains(bx, layout.ty) || has_multiple_variants {
+            ranges.add_range(offset, layout.size);
+            return;
+        }
+
         // Here, we would have something like [(Cell<u8>, u8)],
         // which may have many elements, but has zero statically
         // known fields. If we've reached this point, then we
-        // know that *something* within this array is interior
-        // mutable, so we are conservative and treat the entire
-        // thing as interior mutable.
+        // know that *something* within this dynamic tail is interior
+        // mutable, so we conservatively treat the entire thing as
+        // interior mutable.
         if layout.is_unsized() && layout.fields.count() == 0 {
             if offset < limit {
                 ranges.add_range(offset, limit - offset);
@@ -338,31 +525,37 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
             return;
         }
 
-        let union_or_primitive =
-            matches!(layout.fields, FieldsShape::Union(..) | FieldsShape::Primitive);
-        let has_multiple_variants = matches!(layout.variants, Variants::Multiple { .. });
+        match layout.fields {
+            FieldsShape::Union(..) | FieldsShape::Primitive => {
+                ranges.add_range(offset, layout.size);
+                return;
+            }
 
-        if Self::contains(bx, layout.ty) || union_or_primitive || has_multiple_variants {
-            ranges.add_range(offset, layout.size);
-        } else {
-            // We know at this point that we have an array or an arbitrary layout.
-            for ix in layout.fields.index_by_increasing_offset() {
-                // We need to find the offset for this field relative
-                // to the entire type, not just the current aggregate
-                // that we are visiting here.
-                let field_offset = layout.fields.offset(ix);
-                let layout_offset = field_offset + offset;
+            FieldsShape::Array { stride, count } => {
+                if count == 0 {
+                    return;
+                }
+                let field_layout = layout.field(bx.cx(), 0);
+                let mut inner_ranges = RangeChunks::new(field_layout.size);
+                Self::visit_layout(bx, offset, limit, &mut inner_ranges, field_layout, imprecise);
+                ranges.repeat(inner_ranges, offset, count, stride);
+            }
 
-                let field = layout.field(bx, ix);
-                Self::visit_layout(bx, layout_offset, limit, ranges, field, imprecise);
+            FieldsShape::Arbitrary { .. } => {
+                for ix in layout.fields.index_by_increasing_offset() {
+                    let field_offset = layout.fields.offset(ix);
+                    let absolute_offset = field_offset + offset;
+                    let field = layout.field(bx, ix);
+                    Self::visit_layout(bx, absolute_offset, limit, ranges, field, imprecise);
+                }
             }
         }
     }
     /// Collects the ranges within a type that satisfy the given predicate.
-    fn collect(bx: &mut Bx, layout: TyAndLayout<'tcx>, imprecise: bool) -> Vec<(Size, Size)> {
-        let mut ranges = RangeSet::<Size>::new();
+    fn collect(bx: &mut Bx, layout: TyAndLayout<'tcx>, imprecise: bool) -> RangeChunks {
+        let mut ranges = RangeChunks::new(layout.size);
         Self::visit_layout(bx, Size::ZERO, layout.size, &mut ranges, layout, imprecise);
-        ranges.0
+        ranges
     }
 }
 
