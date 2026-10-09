@@ -308,6 +308,7 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     fn visit_layout(
         bx: &mut Bx,
         offset: Size,
+        limit: Size,
         ranges: &mut RangeSet<Size>,
         layout: TyAndLayout<'tcx>,
         imprecise: bool,
@@ -322,6 +323,19 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
 
         if imprecise {
             return ranges.add_range(offset, layout.size);
+        }
+
+        // Here, we would have something like [(Cell<u8>, u8)],
+        // which may have many elements, but has zero statically
+        // known fields. If we've reached this point, then we
+        // know that *something* within this array is interior
+        // mutable, so we are conservative and treat the entire
+        // thing as interior mutable.
+        if layout.is_unsized() && layout.fields.count() == 0 {
+            if offset < limit {
+                ranges.add_range(offset, limit - offset);
+            }
+            return;
         }
 
         let union_or_primitive =
@@ -340,14 +354,14 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
                 let layout_offset = field_offset + offset;
 
                 let field = layout.field(bx, ix);
-                Self::visit_layout(bx, layout_offset, ranges, field, imprecise);
+                Self::visit_layout(bx, layout_offset, limit, ranges, field, imprecise);
             }
         }
     }
     /// Collects the ranges within a type that satisfy the given predicate.
     fn collect(bx: &mut Bx, layout: TyAndLayout<'tcx>, imprecise: bool) -> Vec<(Size, Size)> {
         let mut ranges = RangeSet::<Size>::new();
-        Self::visit_layout(bx, Size::ZERO, &mut ranges, layout, imprecise);
+        Self::visit_layout(bx, Size::ZERO, layout.size, &mut ranges, layout, imprecise);
         ranges.0
     }
 }
