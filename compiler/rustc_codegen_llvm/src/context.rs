@@ -1131,7 +1131,12 @@ impl<'ll> CodegenCx<'ll, '_> {
                 let fn_ty = self.type_func(type_params, self.type_ptr());
                 let llfn = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
                 let nounwind = llvm::AttributeKind::NoUnwind.create_attr(self.llcx);
-                attributes::apply_to_llfn(llfn, llvm::AttributePlace::Function, &[nounwind]);
+                let nomerge = llvm::AttributeKind::NoMerge.create_attr(self.llcx);
+                attributes::apply_to_llfn(
+                    llfn,
+                    llvm::AttributePlace::Function,
+                    &[nounwind, nomerge],
+                );
                 (fn_ty, llfn)
             }
             // This form is used to retag a pointer that is stored in another place. It receives a pointer to the
@@ -1142,7 +1147,12 @@ impl<'ll> CodegenCx<'ll, '_> {
                 let fn_ty = self.type_func(type_params, self.type_void());
                 let llfn = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
                 let nounwind = llvm::AttributeKind::NoUnwind.create_attr(self.llcx);
-                attributes::apply_to_llfn(llfn, llvm::AttributePlace::Function, &[nounwind]);
+                let nomerge = llvm::AttributeKind::NoMerge.create_attr(self.llcx);
+                attributes::apply_to_llfn(
+                    llfn,
+                    llvm::AttributePlace::Function,
+                    &[nounwind, nomerge],
+                );
                 (fn_ty, llfn)
             }
             _ => {
