@@ -5,8 +5,6 @@
 //! describes which pointers within the place or operand can be retagged. Then, we traverse
 //! the [`RetagPlan`] to emit the calls.
 
-use std::fmt;
-
 use rustc_abi::{Endian, FieldIdx, FieldsShape, Size, VariantIdx, Variants};
 use rustc_ast::Mutability;
 use rustc_data_structures::fx::FxIndexMap;
@@ -15,11 +13,13 @@ use rustc_middle::mir::interpret::Allocation;
 use rustc_middle::mir::{Rvalue, WithRetag};
 use rustc_middle::ty::layout::TyAndLayout;
 use rustc_middle::ty::{self, Ty};
+use rustc_span::DUMMY_SP;
 
 use crate::common::IntPredicate;
 use crate::mir::operand::{OperandRef, OperandRefBuilder, OperandValue};
 use crate::mir::place::PlaceRef;
 use crate::mir::{FunctionCx, bug};
+use crate::size_of_val::size_and_align_of_dst;
 use crate::traits::{
     BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods, LayoutTypeCodegenMethods,
     StaticCodegenMethods,
@@ -33,14 +33,14 @@ pub(crate) fn rvalue_needs_retag(rvalue: &Rvalue<'_>) -> bool {
 
 /// A description of the pointers within a type that need to be retagged.
 #[derive(Debug)]
-enum RetagPlan<V> {
+enum RetagPlan<'tcx, V> {
     /// Indicates that a pointer should be retagged.
-    EmitRetag(RetagInfo<V>),
+    EmitRetag(RetagInfo<V>, Ty<'tcx>),
     /// Indicates that one or more fields or variants of this type
     /// contain pointers that need to be retagged.
     Recurse {
-        field_plans: Option<RetagFields<V>>,
-        variant_plans: FxIndexMap<VariantIdx, RetagPlan<V>>,
+        field_plans: Option<RetagFields<'tcx, V>>,
+        variant_plans: FxIndexMap<VariantIdx, RetagPlan<'tcx, V>>,
     },
 }
 
@@ -50,12 +50,12 @@ enum RetagPlan<V> {
 /// which are never retagged, and primitives, which fall
 /// into [`RetagPlan::EmitRetag`].
 #[derive(Debug)]
-enum RetagFields<V> {
-    Arbitrary(FxIndexMap<FieldIdx, RetagPlan<V>>),
-    Array(Box<RetagPlan<V>>),
+enum RetagFields<'tcx, V> {
+    Arbitrary(FxIndexMap<FieldIdx, RetagPlan<'tcx, V>>),
+    Array(Box<RetagPlan<'tcx, V>>),
 }
 
-impl<V> RetagPlan<V> {
+impl<'tcx, V> RetagPlan<'tcx, V> {
     /// A helper function to move a [`RetagPlan`] into a particular field.
     fn for_field(self, ix: FieldIdx) -> Self {
         let mut field_plans = FxIndexMap::default();
@@ -67,13 +67,13 @@ impl<V> RetagPlan<V> {
     }
 }
 
-impl<'a, 'tcx, V> RetagPlan<V> {
+impl<'a, 'tcx, V> RetagPlan<'tcx, V> {
     /// Attempts to create a [`RetagPlan`] for a place or operand with the given layout.
     fn build<Bx: BuilderMethods<'a, 'tcx>>(
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
         is_fn_entry: bool,
-    ) -> Option<RetagPlan<Bx::Value>> {
+    ) -> Option<RetagPlan<'tcx, Bx::Value>> {
         // If the value being retagged is smaller than a pointer, then it can't contain any
         // pointers we need to retag, so we can stop recursion early. This optimization is
         // crucial for ZSTs, because they can contain way more fields than we can ever visit.
@@ -101,7 +101,7 @@ impl<'a, 'tcx, V> RetagPlan<V> {
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
         is_fn_entry: bool,
-    ) -> Option<RetagPlan<Bx::Value>> {
+    ) -> Option<RetagPlan<'tcx, Bx::Value>> {
         let field_plans = match &layout.fields {
             FieldsShape::Union(_) | FieldsShape::Primitive => None,
             FieldsShape::Arbitrary { .. } => {
@@ -144,7 +144,7 @@ impl<'a, 'tcx, V> RetagPlan<V> {
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
         is_fn_entry: bool,
-    ) -> Option<RetagPlan<Bx::Value>> {
+    ) -> Option<RetagPlan<'tcx, Bx::Value>> {
         assert!(layout.ty.is_box());
         assert_eq!(layout.fields.count(), 2, "`Box` must have exactly 2 fields");
         let mut field_plans = FxIndexMap::default();
@@ -196,7 +196,7 @@ impl<'a, 'tcx, V> RetagPlan<V> {
         pointee_layout: TyAndLayout<'tcx>,
         ptr_kind: Option<Mutability>,
         is_protected: bool,
-    ) -> Option<RetagPlan<Bx::Value>> {
+    ) -> Option<RetagPlan<'tcx, Bx::Value>> {
         let tcx = bx.tcx();
         let retag_opts = tcx.sess.opts.unstable_opts.codegen_emit_retag.unwrap_or_default();
 
@@ -241,12 +241,10 @@ impl<'a, 'tcx, V> RetagPlan<V> {
         flags.set(RetagFlags::IS_FREEZE, is_freeze);
         flags.set(RetagFlags::IS_BOX, is_box);
 
-        Some(RetagPlan::EmitRetag(RetagInfo {
-            size: pointee_layout.size,
-            im_layout,
-            pin_layout,
-            flags,
-        }))
+        Some(RetagPlan::EmitRetag(
+            RetagInfo { size: pointee_layout.size, im_layout, pin_layout, flags },
+            pointee_ty,
+        ))
     }
 
     /// Creates a pointer to a global static allocation containing adjacent pairs of `u64` bytes,
@@ -287,16 +285,23 @@ impl Encoder {
 enum RangeChunk {
     Ranges(RangeSet<Size>),
     Repeat { base: Size, stride: Size, count: u64, lookahead: usize },
+    Tail { stride: Size, lookahead: usize },
+    Fill { offset: Size },
+}
+
+enum RangeCommand {
+    End = 0,
+    Ranges = 1,
+    Repeat = 2,
+    Tail = 3,
+    Fill = 4,
 }
 
 impl RangeChunk {
-    const CMD_END: u64 = 0;
-    const CMD_RANGES: u64 = 1;
-    const CMD_REPEAT: u64 = 2;
     fn encode(&self, enc: &mut Encoder) {
         match self {
             RangeChunk::Ranges(range_set) => {
-                enc.word(Self::CMD_RANGES);
+                enc.word(RangeCommand::Ranges as u64);
                 enc.word(range_set.0.len() as u64);
                 for (offset, width) in range_set.0.iter() {
                     enc.word(offset.bytes());
@@ -304,28 +309,21 @@ impl RangeChunk {
                 }
             }
             RangeChunk::Repeat { stride, count, lookahead, .. } => {
-                enc.word(Self::CMD_REPEAT);
+                enc.word(RangeCommand::Repeat as u64);
                 enc.word(stride.bytes());
                 enc.word(*count);
                 enc.word(*lookahead as u64);
             }
-        }
-    }
-}
-
-impl fmt::Debug for RangeChunk {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RangeChunk::Repeat { base, stride, count, lookahead } => {
-                write!(f, "R({base:?}, {stride:?}, {count:?}, {lookahead:?})")?;
+            RangeChunk::Tail { stride, lookahead, .. } => {
+                enc.word(RangeCommand::Tail as u64);
+                enc.word(stride.bytes());
+                enc.word(*lookahead as u64);
             }
-            RangeChunk::Ranges(info) => {
-                for (offset, size) in &info.0 {
-                    write!(f, "[{offset:?}, {size:?}]")?;
-                }
+            RangeChunk::Fill { offset } => {
+                enc.word(RangeCommand::Fill as u64);
+                enc.word(offset.bytes());
             }
         }
-        Ok(())
     }
 }
 
@@ -344,11 +342,17 @@ struct RangeChunks {
     chunks: Vec<RangeChunk>,
     current_chunk: Option<RangeSet<Size>>,
     size: Size,
+    is_unsized: bool,
 }
 
 impl RangeChunks {
-    fn new(size: Size) -> Self {
-        RangeChunks { size, current_chunk: None, chunks: Vec::new() }
+    fn new(layout: TyAndLayout<'_>) -> Self {
+        RangeChunks {
+            size: layout.size,
+            current_chunk: None,
+            chunks: Vec::new(),
+            is_unsized: layout.is_unsized(),
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -362,7 +366,7 @@ impl RangeChunks {
         for chunk in self.collect() {
             chunk.encode(&mut dest);
         }
-        dest.word(RangeChunk::CMD_END);
+        dest.word(RangeCommand::End as u64);
         dest.out
     }
 
@@ -373,25 +377,44 @@ impl RangeChunks {
         self.chunks
     }
 
-    /// Returns `true` if this set of "chunks" represents
-    /// a contiguous range of bytes.
+    /// Returns `true` if we are certain, statically,
+    /// that this set of "chunks" represents a contiguous
+    /// range of bytes covering the entire layout of the type.
     fn is_contiguous(&self) -> bool {
-        let ranges = if self.chunks.is_empty()
-            && let Some(ranges) = self.current_chunk.as_ref()
-        {
-            ranges
-        } else if self.current_chunk.is_none()
-            && let [RangeChunk::Ranges(ranges)] = self.chunks.as_slice()
-        {
-            ranges
-        } else {
+        if !self.is_unsized {
+            let Some(ranges) = &self.current_chunk else {
+                // We never commit range chunks to the vector unless
+                // they are being repeated, and this indicates we have
+                // a non-contiguous range.
+                return false;
+            };
+            return matches!(ranges.0.as_slice(), [(Size::ZERO, len)] if *len == self.size);
+        }
+        if self.current_chunk.is_some() {
             return false;
-        };
-        matches!(ranges.0.last(), Some((Size::ZERO, len)) if *len == self.size)
+        }
+        match self.chunks.as_slice() {
+            [RangeChunk::Fill { offset: Size::ZERO }] => true,
+            [RangeChunk::Ranges(prefix), RangeChunk::Fill { offset }] => {
+                matches!(prefix.0.as_slice(), [(Size::ZERO, len)] if len == offset)
+            }
+            // We can never treat a tail as contiguous, even if the elements being
+            // repeated are entirely interior mutable. This is because the tail's length
+            // is dynamic, and will be padded up to the correct alignment. Padding bytes
+            // are not interior mutable.
+            _ => false,
+        }
     }
 
     fn ensure_chunk(&mut self) -> &mut RangeSet<Size> {
         self.current_chunk.get_or_insert_with(RangeSet::<Size>::new)
+    }
+
+    fn fill(&mut self, offset: Size) {
+        if let Some(chunk) = self.current_chunk.take() {
+            self.chunks.push(RangeChunk::Ranges(chunk));
+        }
+        self.chunks.push(RangeChunk::Fill { offset });
     }
 
     fn add_range(&mut self, offset: Size, size: Size) {
@@ -400,11 +423,14 @@ impl RangeChunks {
         }
     }
 
-    fn repeat(&mut self, child: RangeChunks, offset: Size, count: u64, stride: Size) {
-        if count == 0 {
-            return;
-        }
-
+    fn repeat(
+        &mut self,
+        child: RangeChunks,
+        offset: Size,
+        count: u64,
+        stride: Size,
+        is_unsized: bool,
+    ) {
         let mut chunks = child.collect();
         let [head, tail @ ..] = chunks.as_mut_slice() else {
             return;
@@ -412,6 +438,7 @@ impl RangeChunks {
 
         if let RangeChunk::Ranges(info) = head
             && tail.is_empty()
+            && !is_unsized
         {
             // We have a single range.
             if let [(base, inner_size)] = info.0.as_mut_slice()
@@ -436,9 +463,9 @@ impl RangeChunks {
                 return;
             }
         }
+
         // If we've made it here, then there needs to be an explicit
         // repeat *somewhere*. We have a non-contiguous set of ranges.
-
         if let Some(current) = self.current_chunk.take() {
             self.chunks.push(RangeChunk::Ranges(current));
         }
@@ -452,10 +479,17 @@ impl RangeChunks {
             // The number of chunks repeated is the number of remaining
             // chunks being merged. 
             && *lookahead == tail.len()
+            // The count of an unsized array is zero, which would
+            // clobber the repeated count here. 
+            && !is_unsized
         {
             // Multiply the count instead of emitting an explicit repeat.
-            // This makes it so that `[[T; N]; M]` is always `[T; M * N]`
+            // This makes it so that `[[T; N]; M]` is always `[T; M * N]`.
+            // This will never happen if we are visiting an unsized struct.
+            //
             *inner_count *= count;
+        } else if is_unsized {
+            self.chunks.push(RangeChunk::Tail { stride, lookahead: chunks.len() });
         } else if count > 1 {
             // We only need an explicit repeat if there's
             // more than one element that needs to be included.
@@ -488,57 +522,39 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
     fn visit_layout(
         bx: &mut Bx,
         offset: Size,
-        limit: Size,
         ranges: &mut RangeChunks,
         layout: TyAndLayout<'tcx>,
-        imprecise: bool,
+        mut imprecise: bool,
     ) {
-        if layout.is_zst() {
+        if layout.is_zst() || Self::excludes(bx, layout.ty) {
             return;
         }
 
-        if Self::excludes(bx, layout.ty) {
-            return;
-        }
+        // We do not recurse into variants...
+        imprecise |= matches!(layout.variants, Variants::Multiple { .. });
 
-        if imprecise {
-            return ranges.add_range(offset, layout.size);
-        }
+        // ...and we treat dyn trait objects as interior mutable.
+        // To fix this last one, we'd need to add a vtable entry.
+        imprecise |= layout.ty.is_trait();
 
-        let has_multiple_variants = matches!(layout.variants, Variants::Multiple { .. });
-
-        if Self::contains(bx, layout.ty) || has_multiple_variants {
-            ranges.add_range(offset, layout.size);
-            return;
-        }
-
-        // Here, we would have something like [(Cell<u8>, u8)],
-        // which may have many elements, but has zero statically
-        // known fields. If we've reached this point, then we
-        // know that *something* within this dynamic tail is interior
-        // mutable, so we conservatively treat the entire thing as
-        // interior mutable.
-        if layout.is_unsized() && layout.fields.count() == 0 {
-            if offset < limit {
-                ranges.add_range(offset, limit - offset);
+        if Self::contains(bx, layout.ty) || imprecise {
+            if layout.is_unsized() {
+                return ranges.fill(offset);
             }
-            return;
+            return ranges.add_range(offset, layout.size);
         }
 
         match layout.fields {
             FieldsShape::Union(..) | FieldsShape::Primitive => {
-                ranges.add_range(offset, layout.size);
-                return;
+                return ranges.add_range(offset, layout.size);
             }
 
             FieldsShape::Array { stride, count } => {
-                if count == 0 {
-                    return;
-                }
+                let is_unsized = layout.is_unsized();
                 let field_layout = layout.field(bx.cx(), 0);
-                let mut inner_ranges = RangeChunks::new(field_layout.size);
-                Self::visit_layout(bx, offset, limit, &mut inner_ranges, field_layout, imprecise);
-                ranges.repeat(inner_ranges, offset, count, stride);
+                let mut inner_ranges = RangeChunks::new(field_layout);
+                Self::visit_layout(bx, offset, &mut inner_ranges, field_layout, imprecise);
+                ranges.repeat(inner_ranges, offset, count, stride, is_unsized);
             }
 
             FieldsShape::Arbitrary { .. } => {
@@ -546,15 +562,15 @@ trait PerByteTracking<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
                     let field_offset = layout.fields.offset(ix);
                     let absolute_offset = field_offset + offset;
                     let field = layout.field(bx, ix);
-                    Self::visit_layout(bx, absolute_offset, limit, ranges, field, imprecise);
+                    Self::visit_layout(bx, absolute_offset, ranges, field, imprecise);
                 }
             }
         }
     }
     /// Collects the ranges within a type that satisfy the given predicate.
     fn collect(bx: &mut Bx, layout: TyAndLayout<'tcx>, imprecise: bool) -> RangeChunks {
-        let mut ranges = RangeChunks::new(layout.size);
-        Self::visit_layout(bx, Size::ZERO, layout.size, &mut ranges, layout, imprecise);
+        let mut ranges = RangeChunks::new(layout);
+        Self::visit_layout(bx, Size::ZERO, &mut ranges, layout, imprecise);
         ranges
     }
 }
@@ -627,22 +643,33 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     fn retag_operand(
         &mut self,
         bx: &mut Bx,
-        plan: &RetagPlan<Bx::Value>,
+        plan: &RetagPlan<'tcx, Bx::Value>,
         curr_operand: OperandRef<'tcx, Bx::Value>,
         builder: &mut OperandRefBuilder<'tcx, Bx::Value>,
         offset: Size,
     ) {
         match plan {
-            RetagPlan::EmitRetag(info) => {
-                let (pointer, _) = curr_operand.val.pointer_parts();
-                let retagged_pointer = bx.retag_reg(pointer, info);
+            RetagPlan::EmitRetag(info, pointee_ty) => {
+                let (pointer, extra) = curr_operand.val.pointer_parts();
+
+                let tail = bx.tcx().struct_tail_for_codegen(*pointee_ty, bx.typing_env());
+                let size = if matches!(tail.kind(), ty::Foreign(_)) {
+                    bx.const_usize(info.size.bytes())
+                } else {
+                    size_and_align_of_dst(bx, *pointee_ty, extra, DUMMY_SP).0
+                };
+                let tail_len = match tail.kind() {
+                    ty::Slice(_) | ty::Str => extra,
+                    _ => None,
+                };
+                let retagged_pointer = bx.retag_reg(pointer, size, tail_len, info);
                 builder.update(offset, retagged_pointer);
             }
             RetagPlan::Recurse { field_plans, variant_plans } => {
                 let layout = curr_operand.layout;
                 if let Some(plans) = field_plans {
                     let mut retag_field =
-                        |bx: &mut Bx, ix: FieldIdx, plan: &RetagPlan<Bx::Value>| {
+                        |bx: &mut Bx, ix: FieldIdx, plan: &RetagPlan<'tcx, Bx::Value>| {
                             let inner_offset = layout.fields.offset(ix.as_usize());
                             let field_offset: Size = offset + inner_offset;
 
@@ -720,16 +747,31 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     fn retag_place(
         &mut self,
         bx: &mut Bx,
-        plan: &RetagPlan<Bx::Value>,
+        plan: &RetagPlan<'tcx, Bx::Value>,
         place: PlaceRef<'tcx, Bx::Value>,
     ) {
         match plan {
-            RetagPlan::EmitRetag(info) => {
-                bx.retag_mem(place.val.llval, info);
+            RetagPlan::EmitRetag(info, pointee_ty) => {
+                let pointee_layout = bx.layout_of(*pointee_ty);
+                let tail = bx.tcx().struct_tail_for_codegen(*pointee_ty, bx.typing_env());
+                let (size, tail_len) =
+                    if pointee_layout.is_sized() || matches!(tail.kind(), ty::Foreign(_)) {
+                        (bx.const_usize(info.size.bytes()), None)
+                    } else {
+                        let op = bx.load_operand(place);
+                        let (_, extra) = op.val.pointer_parts();
+                        let (size, _) = size_and_align_of_dst(bx, *pointee_ty, extra, DUMMY_SP);
+                        let tail_len = match tail.kind() {
+                            ty::Slice(_) | ty::Str => extra,
+                            _ => None,
+                        };
+                        (size, tail_len)
+                    };
+                bx.retag_mem(place.val.llval, size, tail_len, info);
             }
             RetagPlan::Recurse { field_plans, variant_plans } => {
                 if let Some(field_plans) = field_plans {
-                    let mut retag_field = |ix: FieldIdx, plan: &RetagPlan<Bx::Value>| {
+                    let mut retag_field = |ix: FieldIdx, plan: &RetagPlan<'tcx, Bx::Value>| {
                         let field_place = place.project_field(bx, ix.as_usize());
                         self.retag_place(bx, plan, field_place);
                     };
@@ -772,7 +814,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         bx: &mut Bx,
         place: PlaceRef<'tcx, Bx::Value>,
         discr: Bx::Value,
-        variant_plans: &FxIndexMap<VariantIdx, RetagPlan<Bx::Value>>,
+        variant_plans: &FxIndexMap<VariantIdx, RetagPlan<'tcx, Bx::Value>>,
     ) {
         let layout = place.layout;
 

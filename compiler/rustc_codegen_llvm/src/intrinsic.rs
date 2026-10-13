@@ -1066,12 +1066,24 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
         self.call_intrinsic("llvm.va_start", &[self.val_ty(va_list)], &[va_list]);
     }
 
-    fn retag_reg(&mut self, ptr: Self::Value, info: &RetagInfo<Self::Value>) -> Self::Value {
-        codegen_retag_inner(self, "__rust_retag_reg", ptr, info)
+    fn retag_reg(
+        &mut self,
+        ptr: Self::Value,
+        size: Self::Value,
+        extra: Option<Self::Value>,
+        info: &RetagInfo<Self::Value>,
+    ) -> Self::Value {
+        codegen_retag_inner(self, "__rust_retag_reg", ptr, size, extra, info)
     }
 
-    fn retag_mem(&mut self, ptr: Self::Value, info: &RetagInfo<Self::Value>) {
-        codegen_retag_inner(self, "__rust_retag_mem", ptr, info);
+    fn retag_mem(
+        &mut self,
+        ptr: Self::Value,
+        size: Self::Value,
+        extra: Option<Self::Value>,
+        info: &RetagInfo<Self::Value>,
+    ) {
+        codegen_retag_inner(self, "__rust_retag_mem", ptr, size, extra, info);
     }
 
     fn expose(&mut self, ptr: Self::Value) {
@@ -1806,17 +1818,25 @@ fn codegen_retag_inner<'ll, 'tcx>(
     bx: &mut Builder<'_, 'll, 'tcx>,
     name: &'static str,
     ptr: &'ll Value,
+    size: &'ll Value,
+    extra: Option<&'ll Value>,
     info: &RetagInfo<&'ll Value>,
 ) -> &'ll Value {
-    let size = bx.const_usize(info.size.bytes());
     let perms = bx.const_u8(info.flags.bits());
-
+    let extra: &Value = extra.unwrap_or(bx.const_usize(0));
     bx.call_intrinsic(
         name,
         // Retag intrinsics have special handling within `CodegenCx::declare_intrinsic`
         // to ensure that each form has the correct return type.
-        &[bx.type_ptr(), bx.val_ty(size), bx.type_i8(), bx.type_ptr(), bx.type_ptr()],
-        &[ptr, size, perms, info.im_layout, info.pin_layout],
+        &[
+            bx.type_ptr(),
+            bx.val_ty(size),
+            bx.val_ty(extra),
+            bx.type_i8(),
+            bx.type_ptr(),
+            bx.type_ptr(),
+        ],
+        &[ptr, size, extra, perms, info.im_layout, info.pin_layout],
     )
 }
 

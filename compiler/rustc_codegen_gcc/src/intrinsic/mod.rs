@@ -713,11 +713,23 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
         self.block.add_eval(self.location, call);
     }
 
-    fn retag_reg(&mut self, _ptr: Self::Value, _info: &RetagInfo<Self::Value>) -> Self::Value {
+    fn retag_reg(
+        &mut self,
+        _ptr: Self::Value,
+        _size: Self::Value,
+        _extra: Option<Self::Value>,
+        _info: &RetagInfo<Self::Value>,
+    ) -> Self::Value {
         unimplemented!()
     }
 
-    fn retag_mem(&mut self, _ptr: Self::Value, _info: &RetagInfo<Self::Value>) {
+    fn retag_mem(
+        &mut self,
+        _ptr: Self::Value,
+        _size: Self::Value,
+        _extra: Option<Self::Value>,
+        _info: &RetagInfo<Self::Value>,
+    ) {
         unimplemented!()
     }
 
