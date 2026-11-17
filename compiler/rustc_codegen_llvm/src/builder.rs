@@ -18,8 +18,8 @@ use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_hir::def_id::DefId;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
 use rustc_middle::ty::layout::{
-    FnAbiError, FnAbiOfHelpers, FnAbiRequest, HasTypingEnv, LayoutError, LayoutOfHelpers,
-    TyAndLayout,
+    FnAbiError, FnAbiOfHelpers, FnAbiRequest, HasTyCtxt, HasTypingEnv, LayoutError,
+    LayoutOfHelpers, TyAndLayout,
 };
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt};
 use rustc_sanitizers::{cfi, kcfi};
@@ -1079,6 +1079,15 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn ptrtoint(&mut self, val: Value<'ll>, dest_ty: Type<'ll>) -> Value<'ll> {
         unsafe { llvm::LLVMBuildPtrToInt(self.llbuilder(), val, dest_ty, UNNAMED) }
+    }
+
+    fn ptrtoaddr(&mut self, val: Value<'ll>, dest_ty: Type<'ll>) -> Value<'ll> {
+        // FIXME: this still uses `ptrtoint`, which exposes provenance.
+        // When `ptrtoaddr` is added, `__rust_expose_tag` can be removed.
+        if self.tcx().sess.opts.unstable_opts.codegen_emit_retag.is_some() {
+            self.call_intrinsic("__rust_expose_tag", &[self.type_ptr()], &[val]);
+        }
+        self.ptrtoint(val, dest_ty)
     }
 
     fn inttoptr(&mut self, val: Value<'ll>, dest_ty: Type<'ll>) -> Value<'ll> {

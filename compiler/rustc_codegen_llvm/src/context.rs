@@ -1138,9 +1138,10 @@ impl<'ll> CodegenCx<'ll, '_> {
 
                 (fn_ty, f)
             }
-            // Experimental retag intrinsics.
-            // This form is used to retag a pointer that has already been stored in a register. It receives
-            // the pointer and returns an alias with the same address, but different provenance.
+            // Experimental retag and exposure intrinsics.
+            // This form is used to retag a pointer that has already been stored
+            // in a register. It receives the pointer and returns an alias with
+            // the same address, but different provenance.
             "__rust_retag_reg" => {
                 let fn_ty = self.type_func(type_params, self.type_ptr());
                 let llfn = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
@@ -1148,11 +1149,15 @@ impl<'ll> CodegenCx<'ll, '_> {
                 attributes::apply_to_llfn(llfn, llvm::AttributePlace::Function, &[nounwind]);
                 (fn_ty, llfn)
             }
-            // This form is used to retag a pointer that is stored in another place. It receives a pointer to the
-            // place and returns `void`. This communicates the indirection  without requiring an explicit load and
-            // store. If we used the `reg` form instead, then we would need to load the place, retag it, and then
-            // store the result back, which would be undefined behavior for `readonly` places.
-            "__rust_retag_mem" => {
+            // The "mem" form is used to retag a pointer that is stored in another
+            // place. It is equivalent to loading from the place, retagging the
+            // pointer, and storing it back. This is necessary to retag pointers
+            // in `readonly` places, and for SIMD types.
+            //
+            // We emit an additional intrinsic to mark where pointer-to-integer
+            // conversion exposes provenance.
+            // FIXME: Remove `expose_tag` when `ptrtoaddr` is supported.
+            "__rust_retag_mem" | "__rust_expose_tag" => {
                 let fn_ty = self.type_func(type_params, self.type_void());
                 let llfn = self.declare_cfn(base_name, llvm::UnnamedAddr::No, fn_ty);
                 let nounwind = llvm::AttributeKind::NoUnwind.create_attr(self.llcx);
